@@ -1,4 +1,4 @@
-import { getMap } from "./maps.js?v=5";
+import { getMap, INITIAL_UNLOCKS } from "./maps.js?v=6";
 // Seoul rules. Timing and demand rates not specified by the reference are tuned here.
 export const COLORS = [
   "#de6657",
@@ -357,7 +357,7 @@ function commitLine(game, id, candidate) {
       (candidate.stations.length < 2 ||
         !candidate.stations.includes(train.from))
     )
-      releaseTrain(game, train);
+      rehomeTrain(game, train);
   if (
     candidate.stations.length >= 2 &&
     !game.trains.some((t) => t.line === id && !t.pendingMove)
@@ -914,7 +914,7 @@ function step(game, dt, random) {
       }
     }
     if (nextStop(game, train) === null) {
-      releaseTrain(game, train);
+      rehomeTrain(game, train);
       continue;
     }
     if (train.dwell > 0) {
@@ -962,7 +962,7 @@ function step(game, dt, random) {
       }
     }
   }
-  if (game.elapsed >= game.nextStation) {
+  if (!creative(game) && game.elapsed >= game.nextStation) {
     const station = game.preview ?? newStation(game, random);
     if (station) {
       const convertible = game.stations.filter(
@@ -1402,4 +1402,81 @@ export function drawRoute(game, lineId, path) {
     end === "back" ? ids.push(id) : ids.unshift(id);
   }
   return commitLine(game, lineId, { stations: ids, loop });
+}
+
+export function recordProgress(profile, game) {
+  const events = [];
+  if (game.mode === "creative") return events;
+  profile.best ??= {};
+  profile.unlocked = [
+    ...new Set([...INITIAL_UNLOCKS, ...(profile.unlocked ?? [])]),
+  ];
+  profile.extreme ??= [];
+  profile.vintage ??= [];
+  const key = `${game.mapId}:${game.mode}${game.customLayout ? ":custom" : ""}`;
+  profile.best[key] = Math.max(profile.best[key] ?? 0, game.score);
+  if (game.mode !== "normal" || game.customLayout) return events;
+  const map = getMap(game.mapId);
+  if (game.score >= map.goal)
+    for (const id of map.next)
+      if (!profile.unlocked.includes(id)) {
+        profile.unlocked.push(id);
+        events.push({ type: "city", id });
+      }
+  if (challengeComplete(game) && !profile.extreme.includes(map.id)) {
+    profile.extreme.push(map.id);
+    events.push({ type: "extreme", id: map.id });
+  }
+  if (
+    INITIAL_UNLOCKS.includes(map.id) &&
+    game.score >= 1000 &&
+    !profile.vintage.includes(map.id)
+  ) {
+    profile.vintage.push(map.id);
+    events.push({ type: "medal", id: map.id });
+  }
+  return events;
+}
+
+function rehomeTrain(game, train) {
+  const line = game.lines[train.line];
+  if (line.stations.length < 2) {
+    releaseTrain(game, train);
+    return;
+  }
+  const current = game.stations[train.from];
+  unload(game, train);
+  train.from = line.stations.reduce(
+    (best, id) =>
+      Math.hypot(
+        game.stations[id].x - current.x,
+        game.stations[id].y - current.y,
+      ) <
+      Math.hypot(
+        game.stations[best].x - current.x,
+        game.stations[best].y - current.y,
+      )
+        ? id
+        : best,
+    line.stations[0],
+  );
+  train.to = null;
+  train.progress = 0;
+  train.previous = undefined;
+  train.direction = 1;
+  train.dwell = 0.5;
+}
+export function replaceStation(game, lineId, oldId, newId) {
+  if (game.mode === "extreme" && !game.planning)
+    return result(false, "익스트림에서는 중간 노선을 수정할 수 없습니다.");
+  const line = game.lines[lineId],
+    index = line?.stations.indexOf(oldId) ?? -1;
+  if (index < 0 || !game.stations[newId])
+    return result(false, "바꿀 역을 선택하세요.");
+  if (oldId === newId) return result(true);
+  const ids = [...line.stations],
+    other = ids.indexOf(newId);
+  ids[index] = newId;
+  if (other >= 0) ids[other] = oldId;
+  return commitLine(game, lineId, { stations: ids, loop: line.loop });
 }

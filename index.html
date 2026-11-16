@@ -9,7 +9,7 @@
       content="도시를 잇는 작은 지하철. 노선을 그리고 열차를 배치해 승객을 수송하세요."
     />
     <title>Very Mini Metro</title>
-    <link rel="stylesheet" href="style.css?v=5" />
+    <link rel="stylesheet" href="style.css?v=6" />
   </head>
   <body class="at-home">
     <section id="home-screen" class="home-screen" aria-label="시작 화면">
@@ -22,17 +22,15 @@
         <div class="home-copy">
           <h2>Very Mini Metro</h2>
           <p class="home-description">역을 연결하고 도시를 운영하세요.</p>
-          <label class="city-choice" for="city-select"
-            >도시<select id="city-select" aria-label="도시 선택"></select
-          ></label>
+
           <p id="load-error" role="alert" hidden>
             게임을 불러오지 못했습니다. 새로고침해 주세요.
           </p>
           <div class="home-actions">
             <button id="home-new" class="primary" disabled>시작</button
             ><button id="home-continue" class="home-secondary" hidden>
-              이어서 하기
-            </button>
+              이어서 하기</button
+            ><button id="home-guide" class="home-secondary">게임 방법</button>
           </div>
         </div>
         <div class="home-art" aria-hidden="true">
@@ -163,6 +161,10 @@
           운행 시작 <span>→</span>
         </button>
       </section>
+      <aside id="coach" class="coach" hidden>
+        <p id="coach-text" role="status"></p>
+        <button id="coach-close" aria-label="안내 닫기">×</button>
+      </aside>
       <section class="map-wrap" aria-label="지하철 노선 지도">
         <div class="map-caption">
           <span class="live-dot"></span
@@ -206,6 +208,7 @@
           <g id="previews"></g>
           <g id="trains"></g>
           <g id="stations"></g>
+          <g id="edit-handles"></g>
           <g id="drag-preview" pointer-events="none"></g>
         </svg>
         <div class="map-city">
@@ -327,6 +330,41 @@
       </footer>
     </main>
 
+    <dialog id="city-dialog" class="city-dialog">
+      <button id="city-close" class="close" aria-label="뒤로">×</button>
+      <h2>도시 선택</h2>
+      <div id="city-cards" class="map-cards"></div>
+      <section class="city-summary">
+        <div>
+          <h3 id="selected-city-name"></h3>
+          <p id="city-assets"></p>
+          <p id="city-unlock-condition" role="status"></p>
+          <p id="city-challenge"></p>
+          <p id="city-best"></p>
+        </div>
+        <div>
+          <div id="city-modes" class="mode-options">
+            <button data-city-mode="normal">일반</button
+            ><button data-city-mode="extreme">익스트림</button
+            ><button data-city-mode="endless">무한</button
+            ><button data-city-mode="creative">크리에이티브</button>
+          </div>
+          <p id="city-mode-description"></p>
+          <button id="city-start" class="primary">시작</button>
+        </div>
+      </section>
+    </dialog>
+    <dialog id="guide-dialog" class="guide-dialog">
+      <button id="guide-close" class="close" aria-label="닫기">×</button>
+      <p id="guide-page" class="guide-page"></p>
+      <svg id="guide-picture" viewBox="0 0 440 150" aria-hidden="true"></svg>
+      <h2 id="guide-title"></h2>
+      <p id="guide-text"></p>
+      <div class="guide-controls">
+        <button id="guide-prev" class="small-button">이전</button
+        ><button id="guide-next" class="primary">다음</button>
+      </div>
+    </dialog>
     <dialog id="upgrade-dialog">
       <h2>주간 보상</h2>
       <p id="upgrade-trains"></p>
@@ -349,7 +387,12 @@
       <p class="muted">목적지에 도착한 승객 · 이 브라우저에 최고 기록 저장</p>
       <div class="end-actions">
         <button class="primary" id="retry-game">다시 도전 →</button
-        ><button class="small-button" id="over-menu">처음으로</button>
+        ><button class="small-button" id="over-menu">도시 선택</button
+        ><button class="small-button" id="continue-endless">
+          무한으로 계속</button
+        ><button class="small-button" id="continue-creative">
+          크리에이티브로 계속
+        </button>
       </div>
     </dialog>
     <dialog id="train-dialog">
@@ -376,6 +419,7 @@
       <button class="close" id="close-settings" aria-label="닫기">×</button>
 
       <h2>설정</h2>
+      <button id="settings-guide" class="small-button">게임 방법</button>
       <label class="setting"
         ><span>야간 모드</span><input id="night-mode" type="checkbox" /></label
       ><label class="setting"
@@ -393,7 +437,7 @@
     </dialog>
     <script
       type="module"
-      src="game.js?v=5"
+      src="game.js?v=6"
       onerror="document.getElementById('load-error').hidden = false"
     ></script>
   </body>

@@ -563,9 +563,9 @@ test("stations keep appearing beyond forty and the available land grows with the
   for (const s of g.stations.slice(3))
     assert.equal(waterAt(s.x, s.y, 0, g), false);
 });
-test("custom and creative layouts also grow automatically after planning", async () => {
+test("normal and endless custom layouts also grow automatically after planning", async () => {
   const { createDesign, launchDesign } = await import("../simulation.js");
-  for (const mode of ["normal", "creative"]) {
+  for (const mode of ["normal", "endless"]) {
     const g = createDesign(mode, rng(44), "london");
     for (const [shape, x] of [
       ["circle", 150],
@@ -622,4 +622,147 @@ test("a drag extends either end or retracts an endpoint without duplicating stat
   assert.deepEqual(g.lines[0].stations, [0, 1, 2]);
   assert.equal(drawRoute(g, 0, [2, 1]).ok, true);
   assert.deepEqual(g.lines[0].stations, [0, 1]);
+});
+
+test("only London Paris and New York are initially selectable; creative cannot bypass a locked city", async () => {
+  const { cityUnlocked, canStartCity } = await import("../maps.js");
+  const p = { unlocked: [], extreme: [] };
+  for (const id of ["london", "paris", "newyork"])
+    assert.equal(cityUnlocked(p, id), true);
+  assert.equal(cityUnlocked(p, "warsaw"), false);
+  assert.equal(canStartCity(p, "warsaw", "creative"), false);
+  assert.equal(canStartCity(p, "london", "extreme"), false);
+  assert.equal(canStartCity(p, "london", "normal"), true);
+  assert.equal(canStartCity(p, "london", "endless"), true);
+});
+test("normal transport goal unlocks the next city exactly once and survives serialization", async () => {
+  const { recordProgress } = await import("../simulation.js");
+  const { canStartCity } = await import("../maps.js");
+  const p = { unlocked: [], extreme: [], vintage: [], best: {} },
+    g = quiet();
+  g.score = 199;
+  recordProgress(p, g);
+  assert.equal(canStartCity(p, "warsaw"), false);
+  g.score = 200;
+  assert.ok(
+    recordProgress(p, g).some((e) => e.type === "city" && e.id === "warsaw"),
+  );
+  assert.equal(canStartCity(JSON.parse(JSON.stringify(p)), "warsaw"), true);
+  assert.deepEqual(recordProgress(p, g), []);
+});
+test("endless extreme creative and custom scores do not unlock normal progression", async () => {
+  const { recordProgress } = await import("../simulation.js");
+  for (const mode of ["endless", "extreme", "creative"]) {
+    const p = { unlocked: [], extreme: [], vintage: [], best: {} },
+      g = quiet(mode);
+    g.score = 2000;
+    recordProgress(p, g);
+    assert.ok(!p.unlocked.includes("warsaw"));
+    assert.equal(p.extreme.length, 0);
+  }
+  const p = { unlocked: [], extreme: [], vintage: [], best: {} },
+    g = quiet();
+  g.customLayout = true;
+  g.score = 2000;
+  recordProgress(p, g);
+  assert.ok(!p.unlocked.includes("warsaw"));
+});
+test("extreme challenge unlocks that mode only when the full conditions are met", async () => {
+  const { recordProgress } = await import("../simulation.js");
+  const { canStartCity } = await import("../maps.js");
+  const p = { unlocked: [], extreme: [], vintage: [], best: {} },
+    g = quiet();
+  g.score = 1000;
+  recordProgress(p, g);
+  assert.equal(canStartCity(p, "london", "extreme"), true);
+  assert.ok(p.vintage.includes("london"));
+  const q = { unlocked: [], extreme: [], vintage: [], best: {} };
+  g.challengeViolated = true;
+  recordProgress(q, g);
+  assert.equal(canStartCity(q, "london", "extreme"), false);
+});
+test("survival challenge can unlock at its week boundary without delivering a passenger at that instant", async () => {
+  const { recordProgress } = await import("../simulation.js");
+  const p = { unlocked: ["sanfrancisco"], extreme: [], vintage: [], best: {} },
+    g = quiet("normal", "sanfrancisco");
+  g.elapsed = RULES.week * 8 - 0.01;
+  recordProgress(p, g);
+  assert.ok(!p.extreme.includes("sanfrancisco"));
+  g.elapsed = RULES.week * 8;
+  recordProgress(p, g);
+  assert.ok(p.extreme.includes("sanfrancisco"));
+});
+test("creative does not automatically spawn stations or award Sunday assets", () => {
+  const g = quiet("creative");
+  g.nextStation = 0;
+  g.nextUpgrade = 0;
+  run(g, 40);
+  assert.equal(g.stations.length, 3);
+  assert.equal(g.pendingUpgrade, null);
+  assert.equal(g.stock.locomotives, 3);
+});
+test("Sunday reward is issued once even if saved while choosing, and ignores unavailable assets", () => {
+  const g = quiet("normal", "sanfrancisco");
+  g.unlocked = 6;
+  g.elapsed = 179.9;
+  g.nextUpgrade = 180;
+  tick(g, 1, rng(72));
+  assert.equal(g.stock.locomotives, 4);
+  assert.deepEqual([...g.pendingUpgrade].sort(), ["carriage", "tunnels"]);
+  const restored = JSON.parse(JSON.stringify(g));
+  tick(restored, 1);
+  assert.equal(restored.stock.locomotives, 4);
+  const choice = restored.pendingUpgrade[0];
+  assert.equal(chooseUpgrade(restored, choice).ok, true);
+  assert.equal(chooseUpgrade(restored, choice).ok, false);
+  tick(restored, 1);
+  assert.equal(restored.stock.locomotives, 4);
+});
+
+test("middle station replacement and reordering are atomic and preserve loop shape", async () => {
+  const { replaceStation } = await import("../simulation.js");
+  const g = quiet();
+  addStation(g, "circle", 600, 100);
+  line(g, 0, [0, 1, 2]);
+  assert.equal(replaceStation(g, 0, 1, 3).ok, true);
+  assert.deepEqual(g.lines[0].stations, [0, 3, 2]);
+  assert.equal(replaceStation(g, 0, 3, 2).ok, true);
+  assert.deepEqual(g.lines[0].stations, [0, 2, 3]);
+  connect(g, 0, 0);
+  assert.equal(replaceStation(g, 0, 2, 1).ok, true);
+  assert.equal(g.lines[0].loop, true);
+});
+test("editing away a train destination retains the locomotive, carriages and all passengers", async () => {
+  const { replaceStation } = await import("../simulation.js");
+  const g = quiet();
+  addStation(g, "triangle", 600, 100).nextSpawn = 1e9;
+  line(g, 0, [0, 1, 2]);
+  const t = g.trains[0];
+  g.stock.carriages = 1;
+  addCarriage(g, t.id);
+  g.stations[0].waiting = ["square"];
+  run(g, 1);
+  const target = t.to;
+  assert.equal(target, 1);
+  assert.equal(replaceStation(g, 0, 1, 3).ok, true);
+  assert.equal(t.to, target);
+  run(g, 12);
+  assert.equal(g.trains.length, 1);
+  assert.equal(g.trains[0].id, t.id);
+  assert.equal(t.carriages, 1);
+  assert.equal(count(g), 1);
+  assert.equal(g.stock.locomotives, 2);
+});
+test("middle edit rejects insufficient tunnels and remains forbidden in extreme mode", async () => {
+  const { replaceStation } = await import("../simulation.js");
+  const g = quiet();
+  addStation(g, "circle", 600, 450);
+  line(g, 0, [0, 1, 2]);
+  g.stock.tunnels = 0;
+  const before = [...g.lines[0].stations];
+  assert.equal(replaceStation(g, 0, 1, 3).ok, false);
+  assert.deepEqual(g.lines[0].stations, before);
+  const h = quiet("extreme");
+  line(h, 0, [0, 1, 2]);
+  assert.equal(replaceStation(h, 0, 1, 0).ok, false);
 });

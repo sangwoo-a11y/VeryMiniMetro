@@ -1,13 +1,25 @@
-import { MAPS, getMap, INITIAL_UNLOCKS, CHALLENGES } from "./maps.js?v=5";
+import {
+  MAPS,
+  getMap,
+  INITIAL_UNLOCKS,
+  CHALLENGES,
+  PREVIEWS,
+  cityUnlocked,
+  canStartCity,
+  cityRequirement,
+} from "./maps.js?v=6";
 import {
   BASIC,
   SPECIAL,
   RULES,
   createGame,
+  continueAs,
+  recordProgress,
   tick,
   drawRoute,
   insertStation,
   removeStation,
+  replaceStation,
   clearLine,
   openLoop,
   addTrain,
@@ -33,7 +45,7 @@ import {
   launchDesign,
   moveStation,
   canDesign,
-} from "./simulation.js?v=5";
+} from "./simulation.js?v=6";
 
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
@@ -59,6 +71,8 @@ let game,
   tool = "connect",
   pendingInsert = null,
   endpoint = "back";
+let cityMode = "normal",
+  tutorialActive = false;
 let menuMap = "london",
   gesture = null,
   selectedTrain = null,
@@ -382,6 +396,7 @@ function applyView() {
 }
 function renderRoutes() {
   $("routes").replaceChildren();
+  $("edit-handles").replaceChildren();
   $("ghost-routes").replaceChildren();
   const palette = colors();
   game.lines.forEach((line, lineId) => {
@@ -436,6 +451,67 @@ function renderRoutes() {
           group,
         );
     });
+    if (
+      lineId === selected &&
+      line.stations.length >= 3 &&
+      !(game.mode === "extreme" && !game.planning)
+    ) {
+      const middle = line.loop ? line.stations : line.stations.slice(1, -1);
+      for (const id of middle) {
+        const station = game.stations[id];
+        const handle = svg(
+          "g",
+          {
+            "data-edit-station": id,
+            "data-edit-line": lineId,
+            class: "middle-handle",
+            tabindex: 0,
+            role: "button",
+            "aria-label": `${station.name} 노선 편집. 다른 역으로 드래그하면 교체, 빈 곳에 놓으면 제외. Delete로 제외.`,
+          },
+          $("edit-handles"),
+        );
+        const title = svg("title", {}, handle);
+        title.textContent = "중간역 편집: 끌어서 교체 · 빈 곳으로 빼서 제외";
+        svg(
+          "line",
+          {
+            x1: station.x + 8,
+            y1: station.y + 8,
+            x2: station.x + 20,
+            y2: station.y + 20,
+            stroke: palette[lineId],
+            "stroke-width": 2,
+            opacity: 0.7,
+          },
+          handle,
+        );
+        svg(
+          "circle",
+          {
+            cx: station.x + 20,
+            cy: station.y + 20,
+            r: 11,
+            fill: "transparent",
+            "pointer-events": "all",
+          },
+          handle,
+        );
+        svg(
+          "circle",
+          {
+            cx: station.x + 20,
+            cy: station.y + 20,
+            r: 5.5,
+            fill: "var(--station)",
+            stroke: palette[lineId],
+            "stroke-width": 3,
+            "pointer-events": "none",
+          },
+          handle,
+        );
+      }
+    }
     if (!line.loop && line.stations.length >= 2) {
       for (const [id, end] of [
         [line.stations[0], "front"],
@@ -833,6 +909,7 @@ function render() {
           ? "두 역을 연결하면 남은 열차가 자동 배치됩니다."
           : `${game.trains.length}대 운행 중 · 열차를 눌러 이동·객차를 관리하세요.`;
   updateTools();
+  renderCoach();
 }
 function selectStation(id) {
   if (game.gameOver) return;
@@ -893,9 +970,23 @@ function nearestStation(p) {
 }
 $("map").addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
+  const edit = event.target.closest("[data-edit-station]");
   const station = event.target.closest("[data-station]"),
     train = event.target.closest("[data-train]"),
     edge = event.target.closest("[data-edge]");
+  if (edit) {
+    event.preventDefault();
+    selected = Number(edit.dataset.editLine);
+    tool = "connect";
+    gesture = {
+      editStation: Number(edit.dataset.editStation),
+      line: selected,
+      point: mapPoint(event),
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+    return;
+  }
   if (train) {
     event.preventDefault();
     gesture = {
@@ -978,6 +1069,48 @@ $("map").addEventListener("pointerdown", (event) => {
 window.addEventListener("pointermove", (event) => {
   if (!gesture) return;
   const p = mapPoint(event);
+  if (gesture.editStation !== undefined) {
+    const target = nearestStation(p),
+      line = game.lines[gesture.line],
+      ids = [...line.stations],
+      index = ids.indexOf(gesture.editStation);
+    if (target === null) ids.splice(index, 1);
+    else {
+      const other = ids.indexOf(target);
+      ids[index] = target;
+      if (other >= 0 && other !== index) ids[other] = gesture.editStation;
+    }
+    $("drag-preview").replaceChildren();
+    const stops = ids.map((id) => game.stations[id]);
+    if (line.loop && stops.length >= 3) stops.push(stops[0]);
+    const points = [];
+    for (let i = 1; i < stops.length; i++)
+      points.push(...edgePoints(stops[i - 1], stops[i]));
+    svg(
+      "polyline",
+      {
+        points: points.map((q) => `${q.x},${q.y}`).join(" "),
+        fill: "none",
+        stroke: colors()[selected],
+        "stroke-width": 7,
+        opacity: 0.7,
+        "stroke-linejoin": "round",
+      },
+      $("drag-preview"),
+    );
+    const text = svg(
+      "text",
+      { x: p.x + 18, y: p.y - 18, "font-size": 11, fill: "var(--ink)" },
+      $("drag-preview"),
+    );
+    text.textContent =
+      target === null
+        ? "노선에서 제외"
+        : target === gesture.editStation
+          ? "편집 취소"
+          : "이 역으로 연결 변경";
+    return;
+  }
   if (
     gesture.train !== undefined ||
     gesture.edge !== undefined ||
@@ -1073,6 +1206,24 @@ window.addEventListener("pointerup", (event) => {
       event.clientX - old.clientX,
       event.clientY - old.clientY,
     );
+  if (old.editStation !== undefined) {
+    if (distance < 5) return;
+    const rect = $("map").getBoundingClientRect();
+    if (
+      event.clientX < rect.left ||
+      event.clientX > rect.right ||
+      event.clientY < rect.top ||
+      event.clientY > rect.bottom
+    )
+      return;
+    const target = nearestStation(released);
+    notify(
+      target === null
+        ? removeStation(game, old.line, old.editStation)
+        : replaceStation(game, old.line, old.editStation, target),
+    );
+    return;
+  }
   if (old.resource) {
     if (distance < 5) {
       setTool(old.resource);
@@ -1156,6 +1307,20 @@ window.addEventListener("pointercancel", () => {
   $("drag-preview").replaceChildren();
 });
 $("map").addEventListener("keydown", (event) => {
+  const edit = event.target.closest("[data-edit-station]");
+  if (edit && ["Delete", "Backspace"].includes(event.key)) {
+    event.preventDefault();
+    event.stopPropagation();
+    notify(
+      removeStation(
+        game,
+        Number(edit.dataset.editLine),
+        Number(edit.dataset.editStation),
+      ),
+    );
+  }
+});
+$("map").addEventListener("keydown", (event) => {
   if (!["Enter", " "].includes(event.key)) return;
   const station = event.target.closest("[data-station]"),
     train = event.target.closest("[data-train]");
@@ -1233,28 +1398,12 @@ $("train-reverse").onclick = () =>
 $("close-train").onclick = () => $("train-dialog").close();
 
 function updateRecords() {
-  if (game.mode === "creative") return;
-  const key = `${game.mapId}:${game.mode}${game.customLayout ? ":custom" : ""}`;
-  profile.best[key] = Math.max(profile.best[key] ?? 0, game.score);
-  if (game.mode !== "normal" || game.customLayout) return;
-  const map = getMap(game.mapId);
-  if (game.score >= map.goal)
-    for (const id of map.next)
-      if (!profile.unlocked.includes(id)) {
-        profile.unlocked.push(id);
-        toast(`${getMap(id).name} 도시가 열렸습니다!`);
-      }
-  if (challengeComplete(game) && !profile.extreme.includes(game.mapId)) {
-    profile.extreme.push(game.mapId);
-    toast(`${map.name} 익스트림 모드 해금!`);
-  }
-  if (
-    INITIAL_UNLOCKS.includes(game.mapId) &&
-    game.score >= 1000 &&
-    !profile.vintage.includes(game.mapId)
-  ) {
-    profile.vintage.push(game.mapId);
-    toast("1000명 수송 메달 달성!");
+  for (const event of recordProgress(profile, game)) {
+    if (event.type === "city")
+      toast(`${getMap(event.id).name} 도시가 열렸습니다!`);
+    if (event.type === "extreme")
+      toast(`${getMap(event.id).name} 익스트림 모드가 열렸습니다!`);
+    if (event.type === "medal") toast("1000명 수송 메달 달성");
   }
 }
 function showUpgrade() {
@@ -1265,6 +1414,7 @@ function showUpgrade() {
       : `${map.trainReward}대의 ${map.id === "melbourne" ? "전차" : "열차"}가 지급되었습니다. 추가 자산 하나를 선택하세요.`;
   $("engine-options").hidden = map.id !== "osaka";
   $("upgrade-options").replaceChildren();
+  document.querySelector('input[name="engine"][value="normal"]').checked = true;
   const labels = {
     line: ["◉", "새 노선", "노선 1개 개방"],
     carriage: [
@@ -1318,10 +1468,17 @@ function syncStateDialogs() {
   }
 }
 function startGame() {
+  if (!canStartCity(profile, menuMap, cityMode)) {
+    renderCities();
+    return;
+  }
+  const firstPlay = !hasSaved && !profile.tutorialSeen;
   document.querySelectorAll("dialog[open]").forEach((d) => d.close());
   document.body.classList.remove("at-home", "station-panel-open");
   $("home-screen").hidden = true;
-  game = createGame("normal", Math.random, menuMap);
+  game = createGame(cityMode, Math.random, menuMap);
+  tutorialActive = firstPlay;
+  game.tutorial = firstPlay;
   game.challengeMode = false;
   profile.lastCity = menuMap;
   selected = 0;
@@ -1362,13 +1519,11 @@ $("station-shape").onchange = () => {
   updateTools();
 };
 $("menu").onclick = showHome;
-$("home-new").onclick = () => {
-  menuMap = getMap($("city-select").value).id;
-  startGame();
-};
+$("home-new").onclick = showCities;
 $("home-continue").onclick = () => {
   $("home-screen").hidden = true;
   document.body.classList.remove("at-home");
+  tutorialActive = Boolean(game.tutorial && !profile.tutorialSeen);
   initializeMap();
   render();
   syncStateDialogs();
@@ -1381,6 +1536,8 @@ $("launch-design").onclick = () => {
   }
 };
 function showHome() {
+  tutorialActive = false;
+  overShown = false;
   save();
   document.querySelectorAll("dialog[open]").forEach((d) => d.close());
   $("home-screen").hidden = false;
@@ -1390,9 +1547,13 @@ function showHome() {
 
 $("retry-game").onclick = () => {
   menuMap = game.mapId;
+  cityMode = game.mode;
   startGame();
 };
-$("over-menu").onclick = showHome;
+$("over-menu").onclick = () => {
+  showHome();
+  showCities();
+};
 for (const id of ["upgrade-dialog", "over-dialog"])
   $(id).addEventListener("cancel", (e) => e.preventDefault());
 $("clock-button").onclick = () => {
@@ -1487,12 +1648,22 @@ function frame(now) {
     !document.hidden &&
     !document.querySelector("dialog[open]")
   ) {
-    const score = game.score;
-    if (!gesture) tick(game, dt * speed);
+    const score = game.score,
+      week = Math.floor(game.elapsed / RULES.week);
+    if (!gesture && !(tutorialActive && !game.trains.length))
+      tick(game, dt * speed);
     if (game.score > score) {
       tone();
       updateRecords();
+      if (tutorialActive) {
+        tutorialActive = false;
+        game.tutorial = false;
+        profile.tutorialSeen = true;
+        toast("첫 승객이 도착했습니다. 이제 새 역과 혼잡을 확인해 보세요.");
+      }
     }
+    if (Math.floor(game.elapsed / RULES.week) !== week) updateRecords();
+    renderCoach();
     for (const event of game.events) {
       if (event.type === "station") {
         if (!manualView) fitMap();
@@ -1530,14 +1701,6 @@ applySettings();
 $("home-continue").hidden = !hasSaved;
 if (game.planning) tool = "place";
 updateTools();
-const citySelect = $("city-select");
-for (const map of MAPS) {
-  const option = document.createElement("option");
-  option.value = map.id;
-  option.textContent = map.name;
-  citySelect.append(option);
-}
-citySelect.value = getMap(profile.lastCity ?? menuMap).id;
 $("home-new").disabled = false;
 $("load-error").hidden = true;
 requestAnimationFrame(frame);
@@ -1705,3 +1868,273 @@ function collectDragStations(drag, p) {
   }
   drag.lastPoint = p;
 }
+
+function showCities() {
+  menuMap = cityUnlocked(profile, profile.lastCity)
+    ? profile.lastCity
+    : cityUnlocked(profile, game.mapId)
+      ? game.mapId
+      : "london";
+  cityMode = "normal";
+  renderCities();
+  $("city-dialog").showModal();
+}
+function renderCities() {
+  const cards = $("city-cards");
+  cards.replaceChildren();
+  for (const map of MAPS) {
+    const unlocked = cityUnlocked(profile, map.id),
+      button = document.createElement("button");
+    button.className = `map-card${map.id === menuMap ? " selected" : ""}${unlocked ? "" : " map-locked"}`;
+    button.dataset.city = map.id;
+    button.setAttribute("aria-pressed", String(map.id === menuMap));
+    button.setAttribute("aria-label", `${map.name}${unlocked ? "" : " 잠김"}`);
+    const preview = svg("svg", {
+      viewBox: "0 0 1100 570",
+      "aria-hidden": true,
+    });
+    preview.classList.add("map-thumbnail");
+    svg("rect", { width: 1100, height: 570, fill: "var(--map)" }, preview);
+    const land = svg("g", {}, preview);
+    renderTerrain(land, map, true);
+    const nodes = new Map();
+    (PREVIEWS[map.id] ?? []).forEach((points, i) => {
+      svg(
+        "polyline",
+        {
+          points: points.map(([x, y]) => `${x * 11},${y * 5.7}`).join(" "),
+          fill: "none",
+          stroke: map.colors[i],
+          "stroke-width": 14,
+        },
+        preview,
+      );
+      for (const point of [points[0], points.at(-1)])
+        nodes.set(point.join(","), point);
+    });
+    let n = 0;
+    for (const [x, y] of nodes.values())
+      shape(
+        n++ % 3 === 0 ? "triangle" : "circle",
+        x * 11,
+        y * 5.7,
+        17,
+        preview,
+        { fill: "var(--station)", stroke: "var(--ink)", "stroke-width": 6 },
+      );
+    button.append(preview);
+    const title = document.createElement("strong");
+    title.textContent = map.name;
+    button.append(title);
+    const detail = document.createElement("small");
+    detail.textContent = unlocked
+      ? `${map.maxLines}개 노선 · 최고 ${profile.best[`${map.id}:normal`] ?? 0}명`
+      : "잠김";
+    button.append(detail);
+    button.onclick = () => {
+      menuMap = map.id;
+      if (!canStartCity(profile, menuMap, cityMode)) cityMode = "normal";
+      renderCities();
+    };
+    cards.append(button);
+  }
+  const map = getMap(menuMap),
+    unlocked = cityUnlocked(profile, map.id);
+  $("selected-city-name").textContent = `${map.name} · ${map.en}`;
+  $("city-assets").textContent =
+    `시작 노선 ${map.startLines}개 · 열차 ${map.startLines}대 · ${map.crossing === "bridge" ? "다리" : "터널"} ${map.tunnels}개 · 역 정원 ${map.stationCapacity}명`;
+  $("city-unlock-condition").textContent = unlocked
+    ? `${map.goal}명 수송${map.next.length ? ` → ${map.next.map((id) => getMap(id).name).join(", ")} 해금` : ""}`
+    : `해금 조건: ${cityRequirement(map.id)}`;
+  $("city-challenge").textContent =
+    `익스트림: ${CHALLENGES[map.challenge]}${map.challengeScore ? ` · ${map.challengeScore}명 수송` : ""}${profile.extreme.includes(map.id) ? " · 달성" : ""}`;
+  $("city-best").textContent =
+    cityMode === "creative"
+      ? "크리에이티브는 기록과 해금에 반영하지 않습니다."
+      : `이 모드 최고 기록: ${profile.best[`${map.id}:${cityMode}`] ?? 0}명`;
+  const descriptions = {
+    normal: "혼잡을 해소하며 승객을 수송합니다. 일요일마다 자산이 지급됩니다.",
+    extreme:
+      "노선 끝의 연장만 허용합니다. 노선 단축·폐쇄와 열차·객차 재배치는 불가능합니다.",
+    endless:
+      "혼잡으로 게임이 끝나지 않습니다. 하루 수송 효율에 따라 최대 14번 보상받습니다.",
+    creative:
+      "자산은 무제한이며, 역을 직접 편집합니다. 역은 자동으로 생성되지 않습니다.",
+  };
+  $("city-mode-description").textContent = descriptions[cityMode];
+  document.querySelectorAll("[data-city-mode]").forEach((button) => {
+    const mode = button.dataset.cityMode;
+    button.classList.toggle("selected", mode === cityMode);
+    button.disabled =
+      !unlocked || (mode === "extreme" && !profile.extreme.includes(map.id));
+    button.title =
+      mode === "extreme" && !profile.extreme.includes(map.id)
+        ? "이 도시의 익스트림 챌린지를 먼저 달성하세요."
+        : "";
+  });
+  $("city-start").disabled = !canStartCity(profile, menuMap, cityMode);
+}
+$("city-start").onclick = startGame;
+$("city-close").onclick = () => $("city-dialog").close();
+document.querySelectorAll("[data-city-mode]").forEach(
+  (button) =>
+    (button.onclick = () => {
+      cityMode = button.dataset.cityMode;
+      renderCities();
+    }),
+);
+for (const [id, mode] of [
+  ["continue-endless", "endless"],
+  ["continue-creative", "creative"],
+])
+  $(id).onclick = () => {
+    continueAs(game, mode);
+    $("over-dialog").close();
+    overShown = false;
+    tutorialActive = false;
+    initializeMap();
+    render();
+    save();
+  };
+
+const GUIDE = [
+  [
+    "승객의 모양이 목적지입니다.",
+    "큰 도형은 역이고, 옆의 작은 도형은 기다리는 승객입니다. 작은 세모 승객은 세모 역으로, 작은 네모 승객은 네모 역으로 이동합니다. 도착한 승객 한 명이 1점입니다.",
+  ],
+  [
+    "역에서 역으로 끌어 연결하세요.",
+    "마우스나 손가락을 누른 채 역 사이를 드래그합니다. 끝의 T 손잡이로 노선을 연장·단축하고, 선로를 새 역으로 끌면 중간에 삽입합니다. 양 끝을 연결하면 순환선이 됩니다. 중간역의 작은 색상 손잡이를 다른 역에 놓으면 교체·순서를 바꾸고, 빈 곳으로 빼면 그 역만 노선에서 제외합니다.",
+  ],
+  [
+    "열차와 자산을 배치하세요.",
+    "노선을 만들면 남은 열차가 자동 투입됩니다. 열차는 기본 6인승이고, 카이로·뭄바이는 4인승입니다. 객차를 열차에 붙여 정원을 늘리세요. 강을 건너는 역 사이 구간마다 터널·다리 1개가 필요합니다.",
+  ],
+  [
+    "혼잡을 줄이고 다음 주를 준비하세요.",
+    "역 정원은 기본 6명, 서울은 5명, 파리·뭄바이는 4명입니다. 한도를 넘으면 원형 혼잡 타이머가 차고, 다 차면 게임이 끝납니다. 승객이 줄면 타이머도 서서히 줄어듭니다. 하루는 30초이며 일요일에는 열차와 두 추가 자산 중 하나를 받습니다.",
+  ],
+  [
+    "도시와 새로운 모드를 해금하세요.",
+    "런던·파리·뉴욕은 처음부터 플레이할 수 있습니다. 일반 모드에서 도시의 수송 목표를 달성하면 다음 도시가 열리고, 별도 챌린지를 달성하면 익스트림이 열립니다. 무한은 혼잡 패배가 없고, 크리에이티브는 자산 무제한·수동 지도 편집 모드입니다.",
+  ],
+];
+let guidePage = 0;
+function showGuide() {
+  guidePage = 0;
+  renderGuide();
+  $("guide-dialog").showModal();
+}
+function renderGuide() {
+  $("guide-page").textContent = `${guidePage + 1} / ${GUIDE.length}`;
+  $("guide-title").textContent = GUIDE[guidePage][0];
+  $("guide-text").textContent = GUIDE[guidePage][1];
+  $("guide-prev").disabled = guidePage === 0;
+  $("guide-next").textContent =
+    guidePage === GUIDE.length - 1 ? "닫기" : "다음";
+  const picture = $("guide-picture");
+  picture.replaceChildren();
+  svg(
+    "path",
+    {
+      d: "M65 88 H190 L250 40 H375",
+      fill: "none",
+      stroke: "#dc6655",
+      "stroke-width": 6,
+      "stroke-linecap": "round",
+    },
+    picture,
+  );
+  shape("circle", 65, 88, 15, picture, {
+    fill: "var(--panel)",
+    stroke: "var(--ink)",
+    "stroke-width": 3,
+  });
+  shape("triangle", 250, 40, 15, picture, {
+    fill: "var(--panel)",
+    stroke: "var(--ink)",
+    "stroke-width": 3,
+  });
+  shape("square", 375, 40, 15, picture, {
+    fill: "var(--panel)",
+    stroke: "var(--ink)",
+    "stroke-width": 3,
+  });
+  if (guidePage === 0) {
+    shape("triangle", 96, 65, 5, picture, { fill: "var(--ink)" });
+    shape("square", 112, 65, 5, picture, { fill: "var(--ink)" });
+  }
+  if (guidePage === 1) {
+    const text = svg(
+      "text",
+      { x: 150, y: 118, fill: "var(--muted)", "font-size": 13 },
+      picture,
+    );
+    text.textContent = "누른 채 드래그 →";
+  }
+  if (guidePage >= 2) {
+    svg(
+      "rect",
+      {
+        x: 145,
+        y: 81,
+        width: 28,
+        height: 14,
+        rx: 3,
+        fill: "#dc6655",
+        stroke: "var(--panel)",
+        "stroke-width": 2,
+      },
+      picture,
+    );
+  }
+  if (guidePage === 3)
+    svg(
+      "circle",
+      {
+        cx: 65,
+        cy: 88,
+        r: 25,
+        fill: "none",
+        stroke: "#dc6655",
+        "stroke-width": 5,
+        "stroke-dasharray": "105 60",
+        transform: "rotate(-90 65 88)",
+      },
+      picture,
+    );
+}
+$("home-guide").onclick = showGuide;
+$("settings-guide").onclick = showGuide;
+$("guide-close").onclick = () => $("guide-dialog").close();
+$("guide-prev").onclick = () => {
+  guidePage = Math.max(0, guidePage - 1);
+  renderGuide();
+};
+$("guide-next").onclick = () => {
+  if (guidePage === GUIDE.length - 1) $("guide-dialog").close();
+  else {
+    guidePage++;
+    renderGuide();
+  }
+};
+function renderCoach() {
+  $("coach").hidden =
+    !tutorialActive ||
+    game.gameOver ||
+    document.body.classList.contains("at-home");
+  if (!tutorialActive) return;
+  const text = !game.trains.length
+    ? "역을 누른 채 다른 역까지 끌어 첫 노선을 만드세요. 연결하기 전에는 시간이 흐르지 않습니다."
+    : game.score === 0
+      ? "열차가 승객을 태워 같은 모양의 역으로 데려갑니다. 환승할 수 있도록 노선을 연결해보세요."
+      : "첫 승객이 도착했습니다. 시계를 눌러 일시 정지·속도를 조절하고, 새 역과 혼잡을 확인하세요.";
+  if ($("coach-text").textContent !== text) $("coach-text").textContent = text;
+}
+$("coach-close").onclick = () => {
+  tutorialActive = false;
+  game.tutorial = false;
+  profile.tutorialSeen = true;
+  $("coach").hidden = true;
+  save();
+};

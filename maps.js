@@ -2085,3 +2085,25 @@ const hues = {
 };
 for (const map of MAPS)
   if (hues[map.id]) map.colors = [...hues[map.id], ...map.colors].slice(0, 7);
+
+export function cityUnlocked(profile, id) {
+  return Boolean(
+    MAPS.some((map) => map.id === id) &&
+    (INITIAL_UNLOCKS.includes(id) || profile.unlocked?.includes(id)),
+  );
+}
+export function canStartCity(profile, id, mode = "normal") {
+  return Boolean(
+    ["normal", "extreme", "endless", "creative"].includes(mode) &&
+    cityUnlocked(profile, id) &&
+    (mode !== "extreme" || profile.extreme?.includes(id)),
+  );
+}
+export function cityRequirement(id) {
+  const predecessors = MAPS.filter((map) => map.next.includes(id));
+  return (
+    predecessors
+      .map((map) => `${map.name}에서 ${map.goal}명 수송`)
+      .join(" 또는 ") || "앞 도시의 수송 목표 달성"
+  );
+}

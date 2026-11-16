@@ -1961,3 +1961,183 @@ footer {
     gap: 30px;
   }
 }
+.city-dialog {
+  max-width: 1050px;
+  width: 94vw;
+}
+.city-dialog h2 {
+  margin-top: 0;
+}
+.city-dialog .map-cards {
+  max-height: 43svh;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-bottom: 22px;
+}
+.city-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+.city-summary h3 {
+  font-weight: 500;
+  font-size: 20px;
+  margin: 0 0 8px;
+}
+.city-summary p {
+  font-size: 11px;
+  line-height: 1.8;
+  margin: 7px 0;
+  color: var(--muted);
+}
+.city-summary .primary {
+  margin-top: 10px;
+  min-width: 130px;
+}
+.city-summary .mode-options {
+  flex-wrap: nowrap;
+}
+.mode-options button:disabled {
+  opacity: 0.4;
+}
+.city-dialog .map-card.map-locked {
+  background: var(--map);
+}
+.map-locked strong:after {
+  content: " · 잠김";
+  font-size: 8px;
+  color: var(--muted);
+}
+.guide-page {
+  font-size: 10px;
+  color: var(--muted);
+}
+#guide-picture {
+  width: 100%;
+  background: var(--map);
+  border-radius: 7px;
+  margin: 9px 0 15px;
+}
+.guide-controls {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 25px;
+  align-items: center;
+}
+.guide-dialog #guide-text {
+  min-height: 100px;
+}
+.coach {
+  position: absolute;
+  z-index: 5;
+  left: 25px;
+  bottom: 95px;
+  max-width: 340px;
+  padding: 13px 35px 13px 16px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  box-shadow: 0 5px 25px #30402a0a;
+}
+.coach p {
+  font-size: 11px;
+  line-height: 1.9;
+  margin: 0;
+  color: var(--muted);
+}
+.coach button {
+  position: absolute;
+  right: 8px;
+  top: 7px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 19px;
+}
+.home-actions {
+  flex-wrap: wrap;
+}
+.city-dialog .map-thumbnail {
+  height: 70px;
+}
+.city-dialog .close {
+  font-size: 25px;
+}
+@media (max-width: 800px) {
+  .city-dialog .map-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .city-summary {
+    gap: 20px;
+  }
+  .city-summary .mode-options {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 600px) {
+  .city-dialog .map-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    max-height: 34svh;
+    gap: 8px;
+  }
+  .city-dialog .map-thumbnail {
+    height: 53px;
+  }
+  .city-summary {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding-top: 14px;
+  }
+  .city-summary h3 {
+    font-size: 17px;
+  }
+  .city-summary p {
+    font-size: 9px;
+    margin: 5px 0;
+  }
+  .city-summary .primary {
+    width: 100%;
+    padding: 12px;
+  }
+  .city-summary .mode-options {
+    gap: 5px;
+  }
+  .city-summary .mode-options button {
+    font-size: 10px;
+    padding: 8px 10px;
+  }
+  .coach {
+    left: 15px;
+    right: 60px;
+    bottom: 105px;
+    padding: 11px 28px 11px 13px;
+    max-width: none;
+  }
+  .coach p {
+    font-size: 10px;
+  }
+  .home-actions {
+    gap: 15px;
+  }
+  .home-secondary {
+    font-size: 11px;
+  }
+  .guide-dialog #guide-text {
+    min-height: 140px;
+  }
+}
+.city-dialog .map-locked strong:after {
+  content: none;
+}
+.middle-handle {
+  cursor: grab;
+  touch-action: none;
+}
+.middle-handle:hover circle:last-child {
+  r: 7;
+  fill: var(--map);
+}
+.middle-handle:active {
+  cursor: grabbing;
+}
