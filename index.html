@@ -1,8 +1,380 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Very Mini Metro — Seoul</title><link rel="stylesheet" href="style.css"></head><body>
-<header><a class="brand" href="/" aria-label="Very Mini Metro 홈"><span class="brand-icon">m</span><span>very mini metro<span class="brand-sub">A LITTLE CITY. ENDLESS CONNECTIONS.</span></span></a><div class="location"><span class="live-dot"></span> SEOUL <span class="location-ko">서울</span><span class="tag">ENDLESS MODE</span></div><button class="icon-button" id="help" aria-label="게임 방법">?</button></header>
-<main><section class="topbar"><div><div class="eyebrow">YOUR CITY, CONNECTED</div><h1>Make room for<br>the everyday journey<span>.</span></h1></div><div class="stats"><div><div class="stat-label">PASSENGERS DELIVERED</div><strong id="score">000</strong><span class="stat-note">Every connection counts.</span></div><div class="day-stat"><div class="stat-label" id="week">WEEK 01</div><strong id="day">MON</strong><span class="stat-note"><span id="clock">08:00</span> <span class="sun">☀</span></span></div></div></section>
-<section class="map-wrap" aria-label="지하철 노선 지도"><div class="map-caption"><span class="live-dot"></span> LIVE NETWORK <span>01 / SEOUL</span></div><svg id="map" viewBox="0 0 1100 570" aria-label="역을 클릭해서 노선을 연결하세요" role="img"><defs><pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".8" fill="#d8ddd6"/></pattern></defs><rect width="1100" height="570" fill="url(#grid)"/><path class="river-edge" d="M-50 350 C130 210 180 450 380 330 S650 270 720 340 S970 440 1150 240"/><path class="river" d="M-50 350 C130 210 180 450 380 330 S650 270 720 340 S970 440 1150 240"/><text x="525" y="332" class="river-label" transform="rotate(-13 525 332)">H A N   R I V E R</text><g id="routes"></g><g id="trains"></g><g id="stations"></g></svg><div class="map-city">SEOUL<span>37.5665° N · 126.9780° E</span></div><div class="map-hint" id="hint"><span>↗</span> Select a line, then click stations to connect them.</div><div class="zoom"><button id="zoom-in" aria-label="확대">+</button><button id="zoom-out" aria-label="축소">−</button></div><div id="toast" role="status"></div></section>
-<section class="controlbar"><div class="line-panel"><span class="control-label">YOUR LINES</span><div class="lines" id="lines"></div><button id="clear" class="clear-button" title="선택한 노선 초기화">↶ <span>Reset line</span></button></div><div class="playback"><button id="pause" aria-label="일시 정지">Ⅱ</button><button id="speed" title="시뮬레이션 속도">1×</button><span class="divider"></span><button id="restart" title="새 게임">↻</button></div></section>
-<footer><span><i></i> A small network. A city of possibilities.</span><div><span id="network-count">7 STATIONS</span><span>3 LINES</span><button id="sound" aria-pressed="false">SOUND OFF</button></div></footer></main>
-<dialog id="help-dialog"><button class="close" id="close-help" aria-label="닫기">×</button><div class="eyebrow">WELCOME, CITY PLANNER</div><h2>A city in your hands.</h2><p>같은 모양의 목적지로 승객을 데려다주세요.</p><ol><li>아래에서 빨강, 파랑, 노랑 노선을 선택하세요.</li><li>역을 차례로 클릭하거나 역 사이를 드래그해 연결하세요. 열차가 자동으로 운행합니다.</li><li>승객은 자신의 모양과 같은 역에서 내립니다. 다른 노선으로 환승할 수도 있습니다.</li><li>새로운 역이 생기면 노선을 확장하세요. 대기 승객이 많아지면 역이 붉게 표시됩니다.</li></ol><p class="muted">Space 일시 정지 · 1–3 노선 선택 · 최대 12개 역 · 주마다 수송 실적 알림</p><button class="primary" id="start-playing">Let's connect →</button></dialog>
-<script type="module" src="game.js"></script></body></html>
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f8f3" />
+    <meta
+      name="description"
+      content="도시를 잇는 작은 지하철. 노선을 그리고 열차를 배치해 승객을 수송하세요."
+    />
+    <title>Very Mini Metro</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <button class="brand" id="menu">
+        <span class="brand-icon">m</span
+        ><span
+          >very mini metro<span class="brand-sub"
+            >A LITTLE CITY. ENDLESS CONNECTIONS.</span
+          ></span
+        >
+      </button>
+      <button class="location" id="map-menu">
+        <span class="live-dot"></span><span id="city-en">LONDON</span
+        ><span class="location-ko" id="city-ko">런던</span
+        ><span class="tag" id="mode-label">일반</span><span>⌄</span>
+      </button>
+      <div class="header-actions">
+        <button class="icon-button" id="settings" aria-label="설정">⚙</button
+        ><button class="icon-button" id="help" aria-label="게임 방법">?</button>
+      </div>
+    </header>
+    <main>
+      <section class="topbar">
+        <div>
+          <div class="eyebrow">YOUR CITY, CONNECTED</div>
+          <h1>작은 노선에서 시작되는<br />도시의 하루<span>.</span></h1>
+        </div>
+        <div class="stats">
+          <div>
+            <div class="stat-label">수송한 승객</div>
+            <strong id="score">000</strong
+            ><span class="stat-note" id="best">최고 기록 0</span>
+          </div>
+          <button
+            class="day-stat"
+            id="clock-button"
+            title="일시 정지 / 1배속 / 2배속"
+          >
+            <span class="stat-label" id="week">WEEK 01</span
+            ><strong id="day">월요일</strong
+            ><span class="stat-note"
+              ><span id="clock">00:00</span><span id="weekend-label"></span
+            ></span>
+          </button>
+        </div>
+      </section>
+      <div
+        class="challenge-banner"
+        id="challenge-banner"
+        hidden
+        role="status"
+      ></div>
+      <section class="map-wrap" aria-label="지하철 노선 지도">
+        <div class="map-caption">
+          <span class="live-dot"></span
+          ><span id="network-status">LIVE NETWORK</span
+          ><span id="city-number">01 / LONDON</span>
+        </div>
+        <svg
+          id="map"
+          viewBox="0 0 1100 570"
+          aria-label="역 사이를 드래그해 노선을 연결하세요"
+        >
+          <defs>
+            <pattern
+              id="grid"
+              width="28"
+              height="28"
+              patternUnits="userSpaceOnUse"
+            >
+              <circle cx="1" cy="1" r=".8" fill="#cbd3c6" />
+            </pattern>
+          </defs>
+          <rect
+            class="map-background"
+            x="-2000"
+            y="-2000"
+            width="6000"
+            height="6000"
+          />
+          <g id="terrain"></g>
+          <rect
+            id="map-grid"
+            x="0"
+            y="0"
+            width="1100"
+            height="570"
+            fill="url(#grid)"
+            opacity=".5"
+          />
+          <g id="routes"></g>
+          <g id="ghost-routes"></g>
+          <g id="previews"></g>
+          <g id="trains"></g>
+          <g id="stations"></g>
+          <g id="drag-preview" pointer-events="none"></g>
+        </svg>
+        <div class="map-city">
+          <span id="city-name">LONDON</span
+          ><small id="map-details">최대 7개 노선 · 역 정원 6명</small>
+        </div>
+        <div class="map-hint" id="hint" role="status">
+          노선 선택 후 역 사이를 드래그하세요.
+        </div>
+        <div class="zoom">
+          <button id="zoom-in" aria-label="확대">+</button
+          ><button id="zoom-out" aria-label="축소">−</button
+          ><button id="zoom-fit" aria-label="전체 보기">⌖</button>
+        </div>
+        <div id="toast" role="status"></div>
+      </section>
+      <section class="controlbar">
+        <div class="line-panel">
+          <span class="control-label">노선</span>
+          <div class="lines" id="lines"></div>
+          <button id="clear" class="clear-button" title="선택 노선 폐쇄">
+            ×</button
+          ><button
+            id="open-loop"
+            class="clear-button"
+            title="순환선 열기"
+            hidden
+          >
+            ◡
+          </button>
+        </div>
+        <div class="playback">
+          <button id="pause" aria-label="일시 정지">Ⅱ</button
+          ><button id="speed" aria-label="속도 변경">1×</button
+          ><span class="divider"></span
+          ><button id="restart" aria-label="새 게임">↻</button>
+        </div>
+      </section>
+      <section class="resourcebar" aria-label="자산과 편집 도구">
+        <div class="resources">
+          <button
+            id="tool-connect"
+            class="resource selected"
+            data-tool="connect"
+            title="노선 그리기 (D)"
+          >
+            <span>↗</span><span>노선 그리기<small>드래그 / 클릭</small></span>
+          </button>
+          <button
+            id="tool-train"
+            class="resource"
+            data-tool="train"
+            title="열차를 선택한 노선의 역에 배치"
+          >
+            <span>▰</span
+            ><span
+              >열차 <b id="stock-trains">3</b><small>역에 배치</small></span
+            >
+          </button>
+          <button id="tool-fast" class="resource" data-tool="fast" hidden>
+            <span>➤</span
+            ><span
+              >신칸센 <b id="stock-fast">0</b><small>최고속도 2.5×</small></span
+            >
+          </button>
+          <button id="tool-carriage" class="resource" data-tool="carriage">
+            <span>▱</span
+            ><span
+              >객차 <b id="stock-carriages">0</b
+              ><small>열차에 연결</small></span
+            >
+          </button>
+          <div class="resource resource-info">
+            <span>≋</span
+            ><span id="crossing-title"
+              >터널 <b id="stock-tunnels">3</b><small>남은 수량</small></span
+            >
+          </div>
+          <button
+            id="tool-interchange"
+            class="resource"
+            data-tool="interchange"
+          >
+            <span>◎</span
+            ><span
+              >교차역 <b id="stock-interchanges">0</b
+              ><small>역에 적용 · 회수 불가</small></span
+            >
+          </button>
+          <button id="tool-erase" class="resource" data-tool="erase">
+            <span>−</span><span>역 빼기<small>선택 노선에서 제거</small></span>
+          </button>
+        </div>
+      </section>
+      <section id="creative-tools" class="creative-tools" hidden>
+        <span>지도 편집</span
+        ><button data-tool="place" class="small-button">
+          역 배치 / 모양 변경</button
+        ><select id="station-shape" aria-label="역 모양">
+          <option value="circle">○ 원</option>
+          <option value="triangle">△ 세모</option>
+          <option value="square">□ 네모</option>
+          <option value="star">☆ 별</option>
+          <option value="pentagon">⬠ 오각형</option>
+          <option value="rhombus">◇ 마름모</option>
+          <option value="cross">✚ 십자</option>
+          <option value="sector">◡ 부채꼴</option>
+          <option value="diamond">💎 다이아몬드</option>
+          <option value="oval">⬭ 타원</option></select
+        ><button data-tool="delete" class="small-button">역 삭제</button>
+      </section>
+      <footer>
+        <span
+          ><i></i
+          ><span id="footer-message"
+            >역을 연결해 첫 승객을 맞이하세요.</span
+          ></span
+        >
+        <div>
+          <span id="network-count">3 STATIONS</span><span id="efficiency"></span
+          ><button id="save-game">저장 후 메뉴</button
+          ><button id="sound" aria-pressed="false">SOUND OFF</button>
+        </div>
+      </footer>
+    </main>
+    <dialog id="menu-dialog" class="menu-dialog">
+      <button class="close" id="close-menu" aria-label="메뉴 닫기">×</button>
+      <div class="eyebrow">THE WORLD IS WAITING</div>
+      <h2>어느 도시를 연결할까요?</h2>
+      <p class="muted">
+        런던 · 파리 · 뉴욕에서 시작하세요. 수송 목표를 달성하면 다음 도시가
+        열립니다.
+      </p>
+      <div class="menu-top">
+        <div id="mode-options" class="mode-options">
+          <button data-mode="normal" class="selected">일반</button
+          ><button data-mode="extreme">익스트림</button
+          ><button data-mode="endless">무한</button
+          ><button data-mode="creative">크리에이티브</button>
+        </div>
+        <button id="continue-game" class="small-button">이어서 하기 →</button>
+      </div>
+      <p id="mode-description" class="mode-description"></p>
+      <div class="map-cards" id="map-cards"></div>
+      <div class="map-selection">
+        <div>
+          <strong id="selected-map-title">런던</strong>
+          <p id="selected-map-details"></p>
+          <p id="selected-map-challenge"></p>
+          <label id="challenge-label"
+            ><input type="checkbox" id="challenge-mode" /> 도전 조건 위반 시
+            자동 일시 정지</label
+          >
+          <p id="unlock-reason" class="muted"></p>
+        </div>
+        <button id="start-game" class="primary">노선 그리기 →</button>
+      </div>
+    </dialog>
+    <dialog id="help-dialog">
+      <button class="close" id="close-help" aria-label="닫기">×</button>
+      <div class="eyebrow">WELCOME, CITY PLANNER</div>
+      <h2>같은 모양의 역으로.</h2>
+      <p>
+        작은 승객 아이콘은 목적지 역의 모양입니다. 효율적인 노선과 환승으로
+        사람들을 연결하세요.
+      </p>
+      <ol>
+        <li>
+          <b>노선:</b> 색을 선택하고 역들을 차례로 클릭하거나 드래그하세요. 첫역
+          또는 끝역에서 연장할 수 있고, 끝역끼리 연결하면 순환선이 됩니다.
+        </li>
+        <li>
+          <b>편집:</b> 선로 구간을 클릭한 뒤 새 역을 클릭하면 중간에 삽입합니다.
+          ‘역 빼기’로 선택 노선에서 역을 제거하세요. 달리던 열차와 승객은 다음
+          역까지 이동합니다.
+        </li>
+        <li>
+          <b>자산:</b> 열차를 선택해 노선의 역에 배치하고, 객차를 선택해 열차를
+          누르세요. 운행 중인 열차를 누르면 이동·회수할 수 있습니다. 강을 건너는
+          역 사이 구간마다 터널·다리 1개가 필요합니다.
+        </li>
+        <li>
+          <b>운영:</b> 하루는 30초. 일요일마다 열차와 두 선택지 중 하나를
+          받습니다. 역의 정원을 넘으면 혼잡 타이머가 차며, 끝까지 차면 게임이
+          종료됩니다. 한가해지면 서서히 줄어듭니다.
+        </li>
+        <li>
+          <b>모드:</b> 익스트림은 연장만 가능하고 열차·객차 재배치가 금지됩니다.
+          무한은 혼잡 패배 없이 수송 효율로 보상을 받습니다. 크리에이티브는 자산
+          무제한이며 역을 직접 편집합니다.
+        </li>
+      </ol>
+      <p class="muted">
+        Space 일시 정지 · 1–7 노선 선택 · D 그리기 · Esc 도구 취소 · 빈 지도
+        드래그로 이동<br />주말에는 원형 역에서 특수역으로 가는 수요가
+        증가합니다. 설정과 진행 상황은 이 브라우저에 저장됩니다.
+      </p>
+      <button class="primary" id="start-playing">도시를 연결해볼까요 →</button>
+    </dialog>
+    <dialog id="upgrade-dialog">
+      <div class="eyebrow">SUNDAY · NETWORK INVESTMENT</div>
+      <h2>다음 주를 위한 선택.</h2>
+      <p id="upgrade-trains"></p>
+      <div id="engine-options" hidden>
+        <label
+          ><input type="radio" name="engine" value="normal" checked /> 일반 열차
+          2대</label
+        ><label
+          ><input type="radio" name="engine" value="shinkansen" /> 신칸센
+          1대</label
+        >
+      </div>
+      <div class="upgrade-options" id="upgrade-options"></div>
+      <p class="muted">자산 하나를 선택하면 시간이 다시 흐릅니다.</p>
+    </dialog>
+    <dialog id="over-dialog">
+      <div class="eyebrow">EVERY JOURNEY MATTERS</div>
+      <h2 id="over-title">도시가 잠시 멈췄어요.</h2>
+      <p id="over-description"></p>
+      <strong class="final-score" id="final-score">0</strong>
+      <p class="muted">목적지에 도착한 승객 · 이 브라우저에 최고 기록 저장</p>
+      <div class="end-actions">
+        <button class="primary" id="retry-game">다시 도전 →</button
+        ><button class="small-button" id="over-menu">도시 선택</button
+        ><button class="small-button" id="continue-endless">
+          무한으로 계속</button
+        ><button class="small-button" id="continue-creative">
+          크리에이티브로 계속
+        </button>
+      </div>
+    </dialog>
+    <dialog id="train-dialog">
+      <button class="close" id="close-train" aria-label="닫기">×</button>
+      <div class="eyebrow">ROLLING STOCK</div>
+      <h2 id="train-title">열차 관리</h2>
+      <p id="train-description"></p>
+      <div class="train-actions">
+        <button class="small-button" id="train-add-carriage">객차 추가</button
+        ><button class="small-button" id="train-move">열차 이동</button
+        ><button class="small-button" id="train-reverse">
+          순환선 방향 반전</button
+        ><button class="small-button" id="train-remove">열차 회수</button
+        ><button class="small-button" id="carriage-move">객차 1개 이동</button
+        ><button class="small-button" id="carriage-remove">
+          객차 1개 회수
+        </button>
+      </div>
+      <p class="muted">
+        열차·객차를 옮기면 다음 도착역에서 승객을 하차시킨 후 이동합니다.
+      </p>
+    </dialog>
+    <dialog id="settings-dialog">
+      <button class="close" id="close-settings" aria-label="닫기">×</button>
+      <div class="eyebrow">MAKE YOURSELF AT HOME</div>
+      <h2>설정</h2>
+      <label class="setting"
+        ><span>야간 모드</span><input id="night-mode" type="checkbox" /></label
+      ><label class="setting"
+        ><span>색약 친화 노선색</span
+        ><input id="accessible-colors" type="checkbox" /></label
+      ><label class="setting"
+        ><span>효과음</span><input id="sound-setting" type="checkbox" /></label
+      ><label class="setting"
+        ><span>음량</span
+        ><input id="volume" type="range" min="0" max="100" value="30" /></label
+      ><button class="small-button" id="fullscreen">전체 화면 전환</button>
+      <p class="muted" id="storage-status">
+        진행 상황은 3초마다 자동 저장됩니다.
+      </p>
+    </dialog>
+    <script type="module" src="game.js"></script>
+  </body>
+</html>
