@@ -339,9 +339,9 @@ test("endless caps waiting queues and awards by efficiency, not the Sunday calen
   tick(h, 1);
   assert.equal(h.pendingUpgrade, null);
 });
-test("creative has unlimited assets, no auto stations, and unique special types", () => {
+test("creative has unlimited assets and unique editable special types", () => {
   const g = quiet("creative");
-  g.nextStation = 0;
+  g.nextStation = 1e9;
   line(g, 0, [0, 1, 2]);
   for (let i = 0; i < 3; i++) assert.equal(addTrain(g, 0).ok, true);
   assert.equal(addTrain(g, 0).ok, false);
@@ -546,4 +546,49 @@ test("dragging an endpoint backwards shortens the line and retains in-transit pa
   line(h, 0, [0, 1, 2]);
   assert.equal(trimLine(h, 0, 1).ok, false);
   assert.equal(h.lines[0].stations.length, 3);
+});
+
+test("stations keep appearing beyond forty and the available land grows with the network", () => {
+  const g = quiet("endless");
+  g.nextStation = 0;
+  g.nextEfficiency = 1e9;
+  g.nextUpgrade = 1e9;
+  const random = rng(927);
+  for (let i = 0; i < 52; i++) tick(g, 25, random);
+  assert.ok(g.stations.length > 45, `only ${g.stations.length} stations`);
+  assert.ok(
+    g.stations.some((s) => s.x < 100 || s.x > 1000 || s.y < 75 || s.y > 495),
+  );
+  assert.equal(validSavedGame(JSON.parse(JSON.stringify(g))), true);
+  for (const s of g.stations.slice(3))
+    assert.equal(waterAt(s.x, s.y, 0, g), false);
+});
+test("custom and creative layouts also grow automatically after planning", async () => {
+  const { createDesign, launchDesign } = await import("../simulation.js");
+  for (const mode of ["normal", "creative"]) {
+    const g = createDesign(mode, rng(44), "london");
+    for (const [shape, x] of [
+      ["circle", 150],
+      ["triangle", 300],
+      ["square", 450],
+    ])
+      placeStation(g, shape, x, 120);
+    line(g, 0, [0, 1, 2]);
+    assert.equal(launchDesign(g).ok, true);
+    g.nextStation = 0;
+    tick(g, 0.1, rng(84));
+    assert.equal(g.stations.length, 4, mode);
+  }
+});
+test("a failed placement retries promptly instead of waiting a whole station interval", () => {
+  const g = quiet("endless");
+  g.nextStation = 0;
+  tick(g, 0.1, () => 0.5);
+  assert.equal(g.stations.length, 3);
+  assert.ok(g.nextStation - g.elapsed <= 1);
+});
+test("expanded networks with more than two hundred stations can be restored", () => {
+  const g = quiet("creative");
+  for (let i = 0; i < 205; i++) addStation(g, "circle", 1200 + i * 70, 100);
+  assert.equal(validSavedGame(JSON.parse(JSON.stringify(g))), true);
 });

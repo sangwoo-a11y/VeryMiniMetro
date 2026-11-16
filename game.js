@@ -285,11 +285,6 @@ function applySettings() {
   $("accessible-colors").checked = Boolean(profile.settings.accessible);
   $("sound-setting").checked = Boolean(profile.settings.sound);
   $("volume").value = profile.settings.volume;
-  $("sound").textContent = `SOUND ${profile.settings.sound ? "ON" : "OFF"}`;
-  $("sound").setAttribute(
-    "aria-pressed",
-    String(Boolean(profile.settings.sound)),
-  );
 }
 function chooseLine(id) {
   if (id >= game.unlocked) {
@@ -756,8 +751,7 @@ function render() {
   $("week").textContent =
     `WEEK ${String(Math.floor(game.elapsed / RULES.week) + 1).padStart(2, "0")}`;
   const minutes = Math.floor(((game.elapsed % RULES.day) / RULES.day) * 1440);
-  $("clock").textContent =
-    `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  $("clock").textContent = paused ? "일시 정지" : `${speed}×`;
   $("weekend-label").textContent = day >= 5 ? " · 주말 수요" : "";
   $("network-count").textContent = `${game.stations.length} STATIONS`;
   $("efficiency").textContent =
@@ -826,22 +820,19 @@ function render() {
   $("clear").disabled = game.mode === "extreme" && !game.planning;
   $("open-loop").hidden = !game.lines[selected].loop;
   $("open-loop").disabled = game.mode === "extreme" && !game.planning;
-  $("tool-erase").disabled = game.mode === "extreme" && !game.planning;
-  $("pause").textContent = paused ? "▶" : "Ⅱ";
-  $("pause").setAttribute("aria-label", paused ? "계속하기" : "일시 정지");
-  $("speed").textContent = `${speed}×`;
+
   const violated =
     game.challengeMode && !challengeValid(game) && game.mode === "normal";
   $("challenge-banner").hidden = !violated;
   $("challenge-banner").textContent =
     `도전 조건 위반으로 일시 정지 · ${CHALLENGES[map.challenge]}. 노선을 수정하면 계속됩니다.`;
   $("network-status").textContent = game.planning
-    ? "DESIGN MODE"
+    ? "설계 중"
     : paused
-      ? "PAUSED"
+      ? "일시 정지"
       : violated
         ? "CHALLENGE PAUSED"
-        : "LIVE NETWORK";
+        : "운행 중";
   $("footer-message").textContent = game.planning
     ? "설계 중 · 역과 노선을 완성한 뒤 운행을 시작하세요."
     : game.mode === "extreme"
@@ -1490,7 +1481,6 @@ function renderMenu() {
     $("unlock-reason").textContent =
       "자유 설계 · 자동 역 생성 없음 · 원작 지도 해금과 별도 기록";
   $("challenge-label").hidden = menuMode !== "normal";
-  $("continue-game").hidden = !hasSaved;
 }
 $("start-game").onclick = startGame;
 $("station-shape").onchange = () => {
@@ -1528,7 +1518,7 @@ function showHome() {
   $("home-continue").hidden = !hasSaved;
 }
 
-$("close-menu").onclick = $("continue-game").onclick = () => {
+$("close-menu").onclick = () => {
   $("menu-dialog").close();
   if (document.body.classList.contains("at-home")) return;
   syncStateDialogs();
@@ -1536,7 +1526,7 @@ $("close-menu").onclick = $("continue-game").onclick = () => {
 $("menu-dialog").addEventListener("cancel", () => {
   requestAnimationFrame(syncStateDialogs);
 });
-$("save-game").onclick = openMenu;
+
 document.querySelectorAll("[data-mode]").forEach(
   (b) =>
     (b.onclick = () => {
@@ -1569,14 +1559,6 @@ for (const [id, mode] of [
   };
 for (const id of ["upgrade-dialog", "over-dialog"])
   $(id).addEventListener("cancel", (e) => e.preventDefault());
-$("pause").onclick = () => {
-  paused = !paused;
-  render();
-};
-$("speed").onclick = () => {
-  speed = speed === 1 ? 2 : 1;
-  render();
-};
 $("clock-button").onclick = () => {
   if (paused) {
     paused = false;
@@ -1585,18 +1567,12 @@ $("clock-button").onclick = () => {
   else paused = true;
   render();
 };
-$("restart").onclick = () => {
-  openMenu();
-  toast("도시와 모드를 확인하고 ‘노선 그리기’를 누르면 새 게임이 시작됩니다.");
-};
 $("clear").onclick = () => notify(clearLine(game, selected));
 $("open-loop").onclick = () => notify(openLoop(game, selected));
 document
   .querySelectorAll("[data-tool]")
   .forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
-$("help").onclick = () => $("help-dialog").showModal();
-$("close-help").onclick = $("start-playing").onclick = () =>
-  $("help-dialog").close();
+
 $("settings").onclick = () => $("settings-dialog").showModal();
 $("close-settings").onclick = () => $("settings-dialog").close();
 for (const [id, key] of [
@@ -1612,12 +1588,6 @@ for (const [id, key] of [
   };
 $("volume").oninput = (e) => {
   profile.settings.volume = Number(e.target.value);
-  save();
-};
-$("sound").onclick = () => {
-  profile.settings.sound = !profile.settings.sound;
-  applySettings();
-  tone();
   save();
 };
 $("fullscreen").onclick = async () => {

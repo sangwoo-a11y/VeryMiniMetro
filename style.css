@@ -1796,3 +1796,115 @@ footer #save-game {
   --water: #3c595b;
   --ink: #cedecc;
 }
+/* Keep the landing page and controls quiet. */
+.home-copy h2 {
+  font-size: clamp(36px, 4.5vw, 66px);
+  letter-spacing: -2.5px;
+  line-height: 1.12;
+}
+.home-copy .home-description {
+  font-size: 14px;
+  margin: 22px 0;
+  color: var(--muted);
+}
+.home-content {
+  gap: 7vw;
+}
+.home-actions {
+  margin: 28px 0 0;
+}
+.home-actions .primary {
+  padding: 14px 35px;
+  gap: 0;
+  min-width: 110px;
+}
+.home-art {
+  transform: none;
+  box-shadow: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.home-art svg {
+  transform: none;
+}
+.home-screen {
+  background: var(--panel);
+}
+.art-train {
+  animation: none;
+}
+.home-nav .home-wordmark {
+  font-size: 18px;
+}
+.resourcebar {
+  box-shadow: none;
+}
+.map-hint {
+  display: none;
+}
+.header-actions {
+  gap: 0;
+}
+.home-wordmark .brand-icon {
+  width: 30px;
+  height: 30px;
+  font-size: 24px;
+}
+.day-stat {
+  cursor: pointer;
+}
+.day-stat:hover {
+  opacity: 0.65;
+}
+.day-stat .stat-note {
+  font-size: 10px;
+}
+.home-content {
+  padding: 45px 0;
+}
+.home-screen .home-copy h2 {
+  font-weight: 500;
+}
+.map-caption {
+  font-size: 9px;
+  letter-spacing: 0;
+}
+footer {
+  display: none;
+}
+@media (max-width: 600px) {
+  .home-copy h2 {
+    font-size: 37px;
+    letter-spacing: -1.6px;
+  }
+  .home-description {
+    font-size: 12px !important;
+  }
+  .home-content {
+    padding: 40px 0;
+    gap: 45px;
+  }
+  .home-art {
+    width: 100%;
+    max-width: 340px;
+  }
+  .home-actions {
+    gap: 20px;
+  }
+  .home-screen {
+    padding: 25px 6vw;
+  }
+  .resourcebar {
+    bottom: 28px;
+  }
+  .map-caption {
+    font-size: 8px;
+  }
+  .home-copy {
+    padding-top: 20px;
+  }
+  .home-nav .home-wordmark {
+    font-size: 16px;
+  }
+}

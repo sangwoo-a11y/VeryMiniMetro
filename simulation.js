@@ -739,16 +739,22 @@ export function demandOptions(game, station) {
   );
 }
 function generateLocation(game, random) {
-  const growth = Math.min(1, 0.28 + game.elapsed / 650);
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const x = 550 + (clampRandom(random) * 2 - 1) * 450 * growth;
-    const y = 285 + (clampRandom(random) * 2 - 1) * 210 * growth;
-    if (
-      !waterAt(x, y, 20, game) &&
-      game.stations.every((s) => Math.hypot(s.x - x, s.y - y) > 65)
-    )
-      return { x, y };
-  }
+  // Keep enough land available as the network grows instead of filling a fixed rectangle.
+  const growth = Math.max(
+    Math.min(1, 0.28 + game.elapsed / 650),
+    Math.sqrt(game.stations.length / 24),
+  );
+  for (let band = 0; band < 4; band++)
+    for (let attempt = 0; attempt < 120; attempt++) {
+      const radius = growth * (1 + band * 0.35);
+      const x = 550 + (clampRandom(random) * 2 - 1) * 450 * radius;
+      const y = 285 + (clampRandom(random) * 2 - 1) * 210 * radius;
+      if (
+        !waterAt(x, y, 20, game) &&
+        game.stations.every((s) => Math.hypot(s.x - x, s.y - y) > 65)
+      )
+        return { x, y };
+    }
   return null;
 }
 function newStation(game, random) {
@@ -956,12 +962,7 @@ function step(game, dt, random) {
       }
     }
   }
-  if (
-    !creative(game) &&
-    !game.customLayout &&
-    game.elapsed >= game.nextStation &&
-    game.stations.length < 40
-  ) {
+  if (game.elapsed >= game.nextStation) {
     const station = game.preview ?? newStation(game, random);
     if (station) {
       const convertible = game.stations.filter(
@@ -982,7 +983,7 @@ function step(game, dt, random) {
       game.events.push({ type: "station", id: game.stations.length - 1 });
     }
     game.preview = null;
-    game.nextStation = game.elapsed + map.stationInterval;
+    game.nextStation = game.elapsed + (station ? map.stationInterval : 1);
   }
   if (
     game.mode === "extreme" &&
@@ -1182,7 +1183,6 @@ export function validSavedGame(game) {
   if (
     !Array.isArray(game.stations) ||
     (game.stations.length < 3 && !(game.customLayout && game.planning)) ||
-    game.stations.length > 200 ||
     !Array.isArray(game.lines) ||
     game.lines.length !== 7 ||
     !Array.isArray(game.trains) ||
