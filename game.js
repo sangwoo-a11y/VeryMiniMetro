@@ -9,6 +9,7 @@ import {
   insertStation,
   removeStation,
   clearLine,
+  trimLine,
   openLoop,
   addTrain,
   addCarriage,
@@ -19,6 +20,7 @@ import {
   continueAs,
   lineEdges,
   edgePoints,
+  edgeLength,
   pointOnEdge,
   needsTunnel,
   tunnelsUsed,
@@ -311,10 +313,10 @@ function setTool(next) {
 const TOOL_HINTS = {
   "move-station":
     "역을 드래그해 위치를 조정하세요. 운행 전까지만 이동할 수 있습니다.",
-  connect: "역 사이를 드래그 · 선로 구간 클릭 후 새 역을 클릭하면 중간 삽입",
-  train: "열차를 배치할 선택 노선의 역을 누르세요.",
+  connect: "역 사이를 드래그 · 선로를 새 역으로 드래그하면 중간에 삽입",
+  train: "열차를 선로 위로 드래그하거나, 선택 노선의 역을 누르세요.",
   fast: "신칸센을 배치할 선택 노선의 역을 누르세요.",
-  carriage: "객차를 연결할 열차를 누르세요.",
+  carriage: "객차를 열차 위로 드래그하거나 열차를 누르세요.",
   interchange: "교차역으로 확장할 역을 누르세요. 적용 후 회수 불가.",
   erase: "선택한 노선에서 제거할 역을 누르세요.",
   place: "빈 땅에 역을 배치하거나 기존 역을 눌러 모양을 바꾸세요.",
@@ -398,8 +400,9 @@ function renderRoutes() {
   const palette = colors();
   game.lines.forEach((line, lineId) => {
     lineEdges(line).forEach(([a, b], index) => {
+      const offset = trackOffset(lineId, a, b);
       const points = edgePoints(game.stations[a], game.stations[b])
-        .map((p) => `${p.x},${p.y}`)
+        .map((p) => `${p.x + offset.x},${p.y + offset.y}`)
         .join(" ");
       const group = svg(
         "g",
@@ -427,17 +430,25 @@ function renderRoutes() {
           "stroke-linecap": "round",
           "stroke-linejoin": "round",
           opacity: tool === "connect" && selected !== lineId ? 0.72 : 1,
-          "stroke-dasharray": needsTunnel(
-            game.stations[a],
-            game.stations[b],
-            game,
-          )
-            ? "9 5"
-            : "none",
+          "stroke-dasharray": "none",
           "pointer-events": "none",
         },
         group,
       );
+      if (needsTunnel(game.stations[a], game.stations[b], game))
+        svg(
+          "polyline",
+          {
+            points,
+            fill: "none",
+            stroke: "var(--water)",
+            "stroke-width": 8,
+            "stroke-dasharray": "3 9",
+            mask: "url(#tunnel-water)",
+            "pointer-events": "none",
+          },
+          group,
+        );
     });
     if (!line.loop && line.stations.length >= 2) {
       for (const [id, end] of [
@@ -447,16 +458,36 @@ function renderRoutes() {
         const s = game.stations[id],
           handle = svg(
             "g",
-            { "data-station": id, "data-end": end, class: "endpoint" },
+            {
+              "data-station": id,
+              "data-end": end,
+              "data-handle-line": lineId,
+              class: "endpoint",
+            },
             $("routes"),
           );
+        const neighbor =
+          game.stations[
+            end === "front" ? line.stations[1] : line.stations.at(-2)
+          ];
+        const near = edgePoints(s, neighbor)[1];
+        const dx = near.x - s.x,
+          dy = near.y - s.y,
+          len = Math.hypot(dx, dy) || 1;
+        const x = s.x - (dx / len) * 26,
+          y = s.y - (dy / len) * 26;
+        svg(
+          "circle",
+          { cx: x, cy: y, r: 12, fill: "transparent", "pointer-events": "all" },
+          handle,
+        );
         svg(
           "line",
           {
-            x1: s.x - 7,
-            y1: s.y - 20,
-            x2: s.x + 7,
-            y2: s.y - 20,
+            x1: x - (dy / len) * 7,
+            y1: y + (dx / len) * 7,
+            x2: x + (dy / len) * 7,
+            y2: y - (dx / len) * 7,
             stroke: palette[lineId],
             "stroke-width": 3,
           },
@@ -465,10 +496,10 @@ function renderRoutes() {
         svg(
           "line",
           {
-            x1: s.x,
-            y1: s.y - 24,
-            x2: s.x,
-            y2: s.y - 15,
+            x1: s.x - (dx / len) * 14,
+            y1: s.y - (dy / len) * 14,
+            x2: x,
+            y2: y,
             stroke: palette[lineId],
             "stroke-width": 2,
           },
@@ -617,9 +648,16 @@ function renderStations() {
 }
 function trainPoint(train) {
   const a = game.stations[train.from];
-  return train.to === null
-    ? { x: a.x, y: a.y, angle: 0 }
-    : pointOnEdge(a, game.stations[train.to], train.progress);
+  const p =
+    train.to === null
+      ? { x: a.x, y: a.y, angle: 0 }
+      : pointOnEdge(a, game.stations[train.to], train.progress);
+  if (train.to !== null) {
+    const offset = trackOffset(train.line, train.from, train.to);
+    p.x += offset.x;
+    p.y += offset.y;
+  }
+  return p;
 }
 function drawTrains() {
   $("trains").replaceChildren();
@@ -727,6 +765,10 @@ function render() {
       ? `효율 ${game.efficiency} / 보상 ${game.upgradeCount}/14`
       : "";
   document.body.classList.toggle("planning", Boolean(game.planning));
+  document.body.classList.toggle(
+    "editing-stations",
+    ["place", "delete", "move-station"].includes(tool),
+  );
   $("workspace-title").textContent = game.planning
     ? "나의 도시 설계"
     : "도시의 하루";
@@ -741,6 +783,8 @@ function render() {
     `○ ${counts[0]}  ·  △ ${counts[1]}  ·  □ ${counts[2]}  /  ${game.stations.length}개 역 · ${game.lines.filter((l) => l.stations.length > 1).length}개 노선`;
   $("launch-design").disabled = !counts.every((n) => n > 0);
   $("creative-tools").hidden = !canDesign(game);
+  $("station-editor-toggle").hidden =
+    !canDesign(game) || Boolean(game.planning);
   $("map-details").textContent =
     `최대 ${map.maxLines}개 노선 · 역 정원 ${map.stationCapacity}명`;
   $("lines").replaceChildren();
@@ -889,12 +933,19 @@ $("map").addEventListener("pointerdown", (event) => {
     edge = event.target.closest("[data-edge]");
   if (train) {
     event.preventDefault();
-    handleTrain(Number(train.dataset.train));
+    gesture = {
+      train: Number(train.dataset.train),
+      point: mapPoint(event),
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
     return;
   }
   const p = mapPoint(event);
   if (station) {
     event.preventDefault();
+    if (station.dataset.handleLine !== undefined)
+      selected = Number(station.dataset.handleLine);
     gesture = {
       station: Number(station.dataset.station),
       point: p,
@@ -909,6 +960,13 @@ $("map").addEventListener("pointerdown", (event) => {
     if (line < game.unlocked) {
       selected = line;
       pendingInsert = Number(edge.dataset.edge);
+      gesture = {
+        edge: pendingInsert,
+        line,
+        point: p,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      };
       updateTools();
     }
     return;
@@ -935,6 +993,27 @@ $("map").addEventListener("pointerdown", (event) => {
 window.addEventListener("pointermove", (event) => {
   if (!gesture) return;
   const p = mapPoint(event);
+  if (
+    gesture.train !== undefined ||
+    gesture.edge !== undefined ||
+    gesture.resource
+  ) {
+    $("drag-preview").replaceChildren();
+    svg(
+      "circle",
+      {
+        cx: p.x,
+        cy: p.y,
+        r: 14,
+        fill: "var(--station)",
+        stroke: colors()[selected],
+        "stroke-width": 3,
+        opacity: 0.8,
+      },
+      $("drag-preview"),
+    );
+    return;
+  }
   if (gesture.pan) {
     if (
       Math.hypot(
@@ -974,6 +1053,61 @@ window.addEventListener("pointerup", (event) => {
   gesture = null;
   $("drag-preview").replaceChildren();
   if (old.pan) return;
+  const released = mapPoint(event),
+    distance = Math.hypot(
+      event.clientX - old.clientX,
+      event.clientY - old.clientY,
+    );
+  if (old.resource) {
+    if (distance < 5) {
+      setTool(old.resource);
+      return;
+    }
+    const target = nearestStation(released),
+      edge = closestRoute(released);
+    if (old.resource === "train" || old.resource === "fast") {
+      if (edge)
+        notify(
+          addTrain(
+            game,
+            edge.line,
+            edge.station,
+            old.resource === "fast" ? "shinkansen" : "normal",
+            edge.position,
+          ),
+        );
+      else toast("노선 위에 열차를 놓으세요.");
+    } else if (old.resource === "carriage") {
+      const train = closestTrain(released);
+      if (train) notify(addCarriage(game, train.id));
+      else toast("객차를 열차 위에 놓으세요.");
+    } else if (old.resource === "interchange" && target !== null)
+      notify(upgradeStation(game, target));
+    return;
+  }
+  if (old.train !== undefined) {
+    if (distance < 5) {
+      handleTrain(old.train);
+      return;
+    }
+    const route = closestRoute(released);
+    if (route)
+      notify(
+        moveTrain(game, old.train, route.line, route.station, route.position),
+      );
+    else toast("옮길 노선 위에 열차를 놓으세요. 취소되었습니다.");
+    return;
+  }
+  if (old.edge !== undefined) {
+    if (distance > 5) {
+      const target = nearestStation(released);
+      if (target !== null)
+        notify(insertStation(game, old.line, old.edge, target));
+      pendingInsert = null;
+      updateTools();
+    }
+    return;
+  }
   if (tool === "move-station") {
     const p = mapPoint(event);
     notify(
@@ -1012,7 +1146,14 @@ window.addEventListener("pointerup", (event) => {
       return;
     }
     endpoint = old.station === current.stations[0] ? "front" : "back";
-    notify(connect(game, selected, target, endpoint));
+    const opposite =
+      endpoint === "front" ? current.stations.at(-1) : current.stations[0];
+    if (
+      current.stations.includes(target) &&
+      (target !== opposite || current.stations.length < 3)
+    )
+      notify(trimLine(game, selected, target, endpoint));
+    else notify(connect(game, selected, target, endpoint));
   } else if (!moved) {
     if (old.end) endpoint = old.end;
     selectStation(old.station);
@@ -1202,7 +1343,7 @@ function startGame() {
     return;
   }
   document.querySelectorAll("dialog[open]").forEach((d) => d.close());
-  document.body.classList.remove("at-home");
+  document.body.classList.remove("at-home", "station-panel-open");
   $("home-screen").hidden = true;
   game = $("custom-layout").checked
     ? createDesign(menuMode, Math.random, menuMap)
@@ -1236,6 +1377,7 @@ function initializeMap() {
   $("city-number").textContent =
     `${String(MAPS.indexOf(map) + 1).padStart(2, "0")} / ${map.en}`;
   renderTerrain();
+  renderWaterMask();
   if (!manualView) fitMap();
   applySettings();
 }
@@ -1360,7 +1502,7 @@ $("custom-layout").onchange = renderMenu;
 $("map-menu").onclick = openMenu;
 $("menu").onclick = showHome;
 $("home-new").onclick = () => {
-  $("custom-layout").checked = true;
+  $("custom-layout").checked = false;
   renderMenu();
   $("menu-dialog").showModal();
 };
@@ -1540,7 +1682,7 @@ function frame(now) {
     !document.querySelector("dialog[open]")
   ) {
     const score = game.score;
-    tick(game, dt * speed);
+    if (!gesture) tick(game, dt * speed);
     if (game.score > score) {
       tone();
       updateRecords();
@@ -1584,3 +1726,134 @@ $("home-continue").hidden = !hasSaved;
 if (game.planning) tool = "place";
 updateTools();
 requestAnimationFrame(frame);
+
+function closestTrain(p) {
+  return game.trains
+    .map((train) => ({
+      train,
+      d: Math.hypot(trainPoint(train).x - p.x, trainPoint(train).y - p.y),
+    }))
+    .filter((x) => x.d < 30)
+    .sort((a, b) => a.d - b.d)[0]?.train;
+}
+function closestRoute(p) {
+  const hits = [];
+  game.lines.forEach((line, lineId) =>
+    lineEdges(line).forEach(([a, b]) => {
+      const points = edgePoints(game.stations[a], game.stations[b]);
+      let travelled = 0;
+      for (let i = 1; i < points.length; i++) {
+        const u = points[i - 1],
+          v = points[i],
+          dx = v.x - u.x,
+          dy = v.y - u.y;
+        const t = Math.max(
+          0,
+          Math.min(
+            1,
+            ((p.x - u.x) * dx + (p.y - u.y) * dy) / (dx * dx + dy * dy || 1),
+          ),
+        );
+        const d = Math.hypot(p.x - u.x - t * dx, p.y - u.y - t * dy);
+        if (d < 24)
+          hits.push({
+            line: lineId,
+            position: {
+              from: a,
+              to: b,
+              progress:
+                (travelled + t * Math.hypot(dx, dy)) /
+                (edgeLength(game.stations[a], game.stations[b]) || 1),
+            },
+            station:
+              Math.hypot(p.x - game.stations[a].x, p.y - game.stations[a].y) <
+              Math.hypot(p.x - game.stations[b].x, p.y - game.stations[b].y)
+                ? a
+                : b,
+            d,
+          });
+        travelled += Math.hypot(dx, dy);
+      }
+    }),
+  );
+  return hits.sort((a, b) => a.d - b.d)[0];
+}
+for (const name of ["train", "fast", "carriage", "interchange"])
+  $("tool-" + name).addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    gesture = {
+      resource: name,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+  });
+
+$("station-editor-toggle").onclick = () =>
+  document.body.classList.toggle("station-panel-open");
+
+function trackOffset(lineId, a, b) {
+  const shared = game.lines
+    .map((line, id) =>
+      lineEdges(line).some(
+        ([x, y]) => (x === a && y === b) || (x === b && y === a),
+      )
+        ? id
+        : -1,
+    )
+    .filter((id) => id >= 0);
+  if (shared.length < 2) return { x: 0, y: 0 };
+  const u = game.stations[Math.min(a, b)],
+    v = game.stations[Math.max(a, b)],
+    len = Math.hypot(v.x - u.x, v.y - u.y) || 1;
+  const shift = (shared.indexOf(lineId) - (shared.length - 1) / 2) * 6;
+  return { x: (-(v.y - u.y) / len) * shift, y: ((v.x - u.x) / len) * shift };
+}
+
+function renderWaterMask() {
+  const defs = $("map").querySelector("defs");
+  defs.querySelector("#tunnel-water")?.remove();
+  const mask = svg(
+    "mask",
+    {
+      id: "tunnel-water",
+      maskUnits: "userSpaceOnUse",
+      x: -2000,
+      y: -2000,
+      width: 6000,
+      height: 6000,
+    },
+    defs,
+  );
+  svg(
+    "rect",
+    { x: -2000, y: -2000, width: 6000, height: 6000, fill: "black" },
+    mask,
+  );
+  const map = getMap(game.mapId);
+  for (const feature of map.features)
+    svg(
+      feature.polygon ? "polygon" : "polyline",
+      {
+        points: feature.points
+          .map(([x, y]) => `${x * 11},${y * 5.7}`)
+          .join(" "),
+        fill: feature.polygon ? "white" : "none",
+        stroke: "white",
+        "stroke-width": feature.polygon ? 0 : feature.width * 5.7,
+        "stroke-linejoin": "round",
+        "stroke-linecap": "round",
+      },
+      mask,
+    );
+  for (const island of map.islands)
+    svg(
+      "polygon",
+      {
+        points: island.map(([x, y]) => `${x * 11},${y * 5.7}`).join(" "),
+        fill: "black",
+        stroke: "black",
+        "stroke-width": 2,
+      },
+      mask,
+    );
+}

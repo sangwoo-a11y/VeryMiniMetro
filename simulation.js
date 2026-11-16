@@ -499,7 +499,13 @@ function nextStop(game, train) {
     train.direction *= -1;
   return ids[index + train.direction];
 }
-export function addTrain(game, lineId, stationId = null, type = "normal") {
+export function addTrain(
+  game,
+  lineId,
+  stationId = null,
+  type = "normal",
+  position = null,
+) {
   if (game.gameOver) return result(false, "게임이 종료되었습니다.");
   const line = game.lines[lineId];
   if (lineId >= game.unlocked || !line || line.stations.length < 2)
@@ -525,6 +531,8 @@ export function addTrain(game, lineId, stationId = null, type = "normal") {
     return result(false, "남은 열차가 없습니다. 주간 보상을 기다리세요.");
   if (stationId !== null && !line.stations.includes(stationId))
     return result(false, "이 노선의 역에 배치하세요.");
+  if (position && !validTrackPosition(game, lineId, position))
+    return result(false, "배치할 선로가 변경되었습니다.");
   if (!creative(game)) game.stock[stockKey]--;
   const train = {
     id: game.nextTrainId++,
@@ -541,6 +549,12 @@ export function addTrain(game, lineId, stationId = null, type = "normal") {
     pendingMove: null,
     pendingCarriage: null,
   };
+  if (position) {
+    train.from = position.from;
+    train.to = position.to;
+    train.progress = position.progress;
+    train.dwell = 0;
+  }
   game.trains.push(train);
   return result(true);
 }
@@ -575,7 +589,13 @@ function releaseTrain(game, train) {
   }
   game.trains.splice(game.trains.indexOf(train), 1);
 }
-export function moveTrain(game, trainId, lineId = null, stationId = null) {
+export function moveTrain(
+  game,
+  trainId,
+  lineId = null,
+  stationId = null,
+  position = null,
+) {
   if (game.mode === "extreme" && !game.planning)
     return result(
       false,
@@ -604,7 +624,9 @@ export function moveTrain(game, trainId, lineId = null, stationId = null) {
         `대상 노선의 열차 한도는 ${getMap(game.mapId).maxTrains}대입니다.`,
       );
   }
-  train.pendingMove = { line: lineId, station: stationId };
+  if (position && !validTrackPosition(game, lineId, position))
+    return result(false, "배치할 선로가 변경되었습니다.");
+  train.pendingMove = { line: lineId, station: stationId, position };
   if (train.to === null) applyPendingMove(game, train);
   return result(true, "다음 역에 승객을 내린 후 열차와 객차를 함께 옮깁니다.");
 }
@@ -627,6 +649,12 @@ function applyPendingMove(game, train) {
   train.previous = undefined;
   train.direction = 1;
   train.dwell = 0.5;
+  if (move.position && validTrackPosition(game, move.line, move.position)) {
+    train.from = move.position.from;
+    train.to = move.position.to;
+    train.progress = move.position.progress;
+    train.dwell = 0;
+  }
 }
 export function moveCarriage(game, fromId, toId = null) {
   if (game.mode === "extreme" && !game.planning)
@@ -1308,4 +1336,30 @@ export function moveStation(game, id, x, y) {
   }
   game.routeVersion = (game.routeVersion ?? 0) + 1;
   return result(true);
+}
+
+function validTrackPosition(game, lineId, p) {
+  return (
+    Number.isFinite(p.progress) &&
+    p.progress >= 0 &&
+    p.progress <= 1 &&
+    game.lines[lineId]?.stations.includes(p.from) &&
+    lineEdges(game.lines[lineId]).some(([a, b]) => a === p.from && b === p.to)
+  );
+}
+
+export function trimLine(game, lineId, stationId, end = "back") {
+  if (game.mode === "extreme" && !game.planning)
+    return result(false, "익스트림에서는 노선을 단축할 수 없습니다.");
+  const line = game.lines[lineId],
+    index = line?.stations.indexOf(stationId) ?? -1;
+  if (index < 0 || line.loop)
+    return result(false, "왕복 노선의 끝을 역까지 끌어 단축하세요.");
+  return commitLine(game, lineId, {
+    stations:
+      end === "front"
+        ? line.stations.slice(index)
+        : line.stations.slice(0, index + 1),
+    loop: false,
+  });
 }

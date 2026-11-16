@@ -21,20 +21,20 @@
       <div class="home-content">
         <div class="home-copy">
           <p class="eyebrow">A SMALL START. A CITY IN MOTION.</p>
-          <h2>당신의 도시,<br />첫 번째 <em>역</em>부터.</h2>
+          <h2>작은 노선,<br />끝없는 <em>연결</em>.</h2>
           <p class="home-description">
-            빈 지도 위에 역을 놓고, 일상을 잇는 노선을 그려보세요.<br />도시의
-            모든 여정은 당신의 설계에서 시작됩니다.
+            역과 역 사이를 드래그해 도시의 지하철을 만드세요.<br />늘어나는
+            승객을 위해, 더 나은 연결을 찾아보세요.
           </p>
           <div class="home-actions">
             <button id="home-new" class="primary">
-              새 도시 설계하기 <span>↗</span></button
+              시작하기 <span>↗</span></button
             ><button id="home-continue" class="home-secondary" hidden>
               이어서 하기 →
             </button>
           </div>
           <div class="home-features">
-            <span>01 역을 배치하고</span><span>02 노선을 연결하고</span
+            <span>01 역을 연결하고</span><span>02 열차를 배치하고</span
             ><span>03 도시를 움직이세요</span>
           </div>
         </div>
@@ -224,6 +224,9 @@
         </div>
         <div id="toast" role="status"></div>
       </section>
+      <button id="station-editor-toggle" class="small-button" hidden>
+        역 편집
+      </button>
       <section class="controlbar">
         <div class="line-panel">
           <span class="control-label">노선</span>
@@ -352,7 +355,7 @@
         열립니다.
       </p>
       <label class="layout-choice"
-        ><input id="custom-layout" type="checkbox" checked /><span
+        ><input id="custom-layout" type="checkbox" /><span
           ><b>역부터 직접 설계</b
           ><small
             >빈 지도에서 시작 · 직접 배치한 역으로 운영 · 모든 도시 사용
@@ -388,11 +391,11 @@
     <dialog id="help-dialog">
       <button class="close" id="close-help" aria-label="닫기">×</button>
       <div class="eyebrow">WELCOME, CITY PLANNER</div>
-      <h2>빈 지도에서, 나의 도시로.</h2>
+      <h2>세 가지 모양, 하나의 도시.</h2>
       <p>
-        새 게임은 빈 지도에서 시작합니다. 역 배치 도구와 모양을 선택해 땅 위에
-        역을 놓고, 역 이동으로 위치를 조정하세요. 노선을 연결한 뒤 운행 시작을
-        누르면 승객이 생성됩니다.
+        기본 게임은 원·세모·네모 역에서 시작합니다. 역 사이를 드래그해 노선을
+        만들면 열차가 운행합니다. 도시 선택에서 직접 설계를 켜면 빈 지도에
+        역부터 배치할 수도 있습니다.
       </p>
       <p>
         작은 승객 아이콘은 목적지 역의 모양입니다. 효율적인 노선과 환승으로
@@ -404,7 +407,7 @@
           또는 끝역에서 연장할 수 있고, 끝역끼리 연결하면 순환선이 됩니다.
         </li>
         <li>
-          <b>편집:</b> 선로 구간을 클릭한 뒤 새 역을 클릭하면 중간에 삽입합니다.
+          <b>편집:</b> 선로 구간을 잡아 새 역으로 드래그하면 중간에 삽입합니다.
           ‘역 빼기’로 선택 노선에서 역을 제거하세요. 달리던 열차와 승객은 다음
           역까지 이동합니다.
         </li>

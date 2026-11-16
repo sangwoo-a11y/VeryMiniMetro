@@ -491,3 +491,59 @@ test("planning permits removal back to an empty canvas, including extreme design
   assert.equal(deleteStation(g, 0).ok, true);
   assert.equal(validSavedGame(g), true);
 });
+
+test("a train dropped on a track starts at that position and consumes exactly one locomotive", () => {
+  const g = quiet();
+  line(g, 0, [0, 1, 2]);
+  const stock = g.stock.locomotives;
+  assert.equal(
+    addTrain(g, 0, 0, "normal", { from: 0, to: 1, progress: 0.5 }).ok,
+    true,
+  );
+  const t = g.trains.at(-1);
+  assert.equal(t.from, 0);
+  assert.equal(t.to, 1);
+  assert.equal(t.progress, 0.5);
+  assert.equal(g.stock.locomotives, stock - 1);
+  assert.equal(
+    addTrain(g, 0, 0, "normal", { from: 0, to: 2, progress: 0.5 }).ok,
+    false,
+  );
+  assert.equal(g.stock.locomotives, stock - 1);
+});
+test("dragged train waits to unload before being placed at a new track position", () => {
+  const g = quiet();
+  line(g, 0, [0, 1]);
+  line(g, 1, [1, 2]);
+  const t = g.trains[0];
+  g.stations[0].waiting = ["square"];
+  run(g, 1);
+  const before = t.from;
+  assert.equal(
+    moveTrain(g, t.id, 1, 1, { from: 1, to: 2, progress: 0.6 }).ok,
+    true,
+  );
+  assert.equal(t.from, before);
+  assert.equal(t.line, 0);
+  for (let i = 0; i < 200 && t.line === 0; i++) tick(g, 0.05);
+  assert.equal(t.line, 1);
+  assert.equal(t.progress, 0.6);
+  assert.equal(count(g), 1);
+});
+
+test("dragging an endpoint backwards shortens the line and retains in-transit passengers", async () => {
+  const { trimLine } = await import("../simulation.js");
+  const g = quiet();
+  line(g, 0, [0, 1, 2]);
+  g.stations[0].waiting = ["square"];
+  run(g, 1);
+  assert.equal(trimLine(g, 0, 1).ok, true);
+  assert.deepEqual(g.lines[0].stations, [0, 1]);
+  assert.equal(count(g), 1);
+  run(g, 6);
+  assert.equal(count(g), 1);
+  const h = quiet("extreme");
+  line(h, 0, [0, 1, 2]);
+  assert.equal(trimLine(h, 0, 1).ok, false);
+  assert.equal(h.lines[0].stations.length, 3);
+});
