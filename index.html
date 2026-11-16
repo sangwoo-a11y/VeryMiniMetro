@@ -93,11 +93,11 @@
       <button class="brand" id="menu">
         <span class="brand-icon">m</span><span>very mini metro</span>
       </button>
-      <button class="location" id="map-menu">
+      <div class="location" id="map-menu">
         <span class="live-dot"></span><span id="city-en">LONDON</span
         ><span class="location-ko" id="city-ko">런던</span
-        ><span class="tag" id="mode-label">일반</span><span>⌄</span>
-      </button>
+        ><span class="tag" id="mode-label">일반</span>
+      </div>
       <div class="header-actions">
         <button class="icon-button" id="settings" aria-label="설정">
           <svg
@@ -320,44 +320,6 @@
         </div>
       </footer>
     </main>
-    <dialog id="menu-dialog" class="menu-dialog">
-      <button class="close" id="close-menu" aria-label="메뉴 닫기">×</button>
-
-      <h2>어느 도시를 연결할까요?</h2>
-      <p class="muted">
-        런던 · 파리 · 뉴욕에서 시작하세요. 수송 목표를 달성하면 다음 도시가
-        열립니다.
-      </p>
-      <label class="layout-choice"
-        ><input id="custom-layout" type="checkbox" /><span
-          ><b>역부터 직접 설계</b
-          ><small>빈 지도에 역 배치 · 운행 후 새 역 자동 생성 가능</small></span
-        ></label
-      >
-      <div class="menu-top">
-        <div id="mode-options" class="mode-options">
-          <button data-mode="normal" class="selected">일반</button
-          ><button data-mode="extreme">익스트림</button
-          ><button data-mode="endless">무한</button
-          ><button data-mode="creative">크리에이티브</button>
-        </div>
-      </div>
-      <p id="mode-description" class="mode-description"></p>
-      <div class="map-cards" id="map-cards"></div>
-      <div class="map-selection">
-        <div>
-          <strong id="selected-map-title">런던</strong>
-          <p id="selected-map-details"></p>
-          <p id="selected-map-challenge"></p>
-          <label id="challenge-label"
-            ><input type="checkbox" id="challenge-mode" /> 도전 조건 위반 시
-            자동 일시 정지</label
-          >
-          <p id="unlock-reason" class="muted"></p>
-        </div>
-        <button id="start-game" class="primary">설계 시작 →</button>
-      </div>
-    </dialog>
 
     <dialog id="upgrade-dialog">
       <h2>주간 보상</h2>
@@ -381,12 +343,7 @@
       <p class="muted">목적지에 도착한 승객 · 이 브라우저에 최고 기록 저장</p>
       <div class="end-actions">
         <button class="primary" id="retry-game">다시 도전 →</button
-        ><button class="small-button" id="over-menu">도시 선택</button
-        ><button class="small-button" id="continue-endless">
-          무한으로 계속</button
-        ><button class="small-button" id="continue-creative">
-          크리에이티브로 계속
-        </button>
+        ><button class="small-button" id="over-menu">처음으로</button>
       </div>
     </dialog>
     <dialog id="train-dialog">

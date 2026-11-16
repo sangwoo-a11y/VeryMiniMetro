@@ -1,4 +1,10 @@
-import { MAPS, getMap, INITIAL_UNLOCKS, CHALLENGES, PREVIEWS } from "./maps.js";
+import {
+  MAPS,
+  getMap,
+  INITIAL_UNLOCKS,
+  CHALLENGES,
+  nextPlayableCity,
+} from "./maps.js";
 import {
   BASIC,
   SPECIAL,
@@ -17,7 +23,6 @@ import {
   moveCarriage,
   upgradeStation,
   chooseUpgrade,
-  continueAs,
   lineEdges,
   edgePoints,
   edgeLength,
@@ -32,7 +37,6 @@ import {
   challengeValid,
   challengeComplete,
   validSavedGame,
-  createDesign,
   launchDesign,
   moveStation,
   canDesign,
@@ -47,16 +51,6 @@ const MODE_NAMES = {
   extreme: "익스트림",
   endless: "무한",
   creative: "크리에이티브",
-};
-const MODE_HELP = {
-  normal:
-    "노선을 설계하고 자산을 배분하세요. 혼잡을 해소하며 더 많은 승객을 수송하는 기본 모드입니다.",
-  extreme:
-    "끝역 연장만 가능하며 노선 단축·삭제, 열차·객차 재배치가 금지됩니다. 도시별 챌린지로 해금합니다.",
-  endless:
-    "혼잡에 따른 게임 오버가 없습니다. 하루 수송 효율을 높여 최대 14번 보상을 받으세요.",
-  creative:
-    "모든 도시를 미리 체험할 수 있습니다. 자산은 무제한이며 역도 직접 배치·변경·삭제합니다. 기록과 해금은 진행되지 않습니다.",
 };
 let profile = {
   unlocked: [...INITIAL_UNLOCKS],
@@ -73,7 +67,6 @@ let game,
   pendingInsert = null,
   endpoint = "back";
 let menuMap = "london",
-  menuMode = "normal",
   gesture = null,
   selectedTrain = null,
   moveId = null;
@@ -110,10 +103,10 @@ try {
   const saved = JSON.parse(localStorage.getItem(SAVE));
   if (validSavedGame(saved)) {
     game = saved;
+    game.challengeMode = false;
     game.events = [];
     hasSaved = true;
     menuMap = game.mapId;
-    menuMode = game.mode;
   }
 } catch {
   /* Missing, old or malformed local data starts a clean game. */
@@ -1317,29 +1310,12 @@ function syncStateDialogs() {
   }
 }
 function startGame() {
-  if (
-    !$("custom-layout").checked &&
-    menuMode !== "creative" &&
-    !profile.unlocked.includes(menuMap)
-  ) {
-    toast("아직 잠긴 도시입니다. 크리에이티브에서 미리 체험할 수 있습니다.");
-    return;
-  }
-  if (
-    !$("custom-layout").checked &&
-    menuMode === "extreme" &&
-    !profile.extreme.includes(menuMap)
-  ) {
-    toast("먼저 이 도시의 익스트림 챌린지를 달성하세요.");
-    return;
-  }
   document.querySelectorAll("dialog[open]").forEach((d) => d.close());
   document.body.classList.remove("at-home", "station-panel-open");
   $("home-screen").hidden = true;
-  game = $("custom-layout").checked
-    ? createDesign(menuMode, Math.random, menuMap)
-    : createGame(menuMode, Math.random, menuMap);
-  game.challengeMode = $("challenge-mode").checked && menuMode === "normal";
+  game = createGame("normal", Math.random, menuMap);
+  game.challengeMode = false;
+  profile.lastCity = menuMap;
   selected = 0;
   paused = false;
   speed = 1;
@@ -1372,129 +1348,20 @@ function initializeMap() {
   if (!manualView) fitMap();
   applySettings();
 }
-function openMenu() {
-  if (!document.body.classList.contains("at-home")) save();
-  menuMap = game.mapId;
-  menuMode = game.mode;
-  renderMenu();
-  if (!$("menu-dialog").open) $("menu-dialog").showModal();
-}
-function renderMenu() {
-  $("map-cards").replaceChildren();
-  $("mode-description").textContent = MODE_HELP[menuMode];
-  document
-    .querySelectorAll("[data-mode]")
-    .forEach((b) =>
-      b.classList.toggle("selected", b.dataset.mode === menuMode),
-    );
-  for (const map of MAPS) {
-    const locked =
-        !$("custom-layout").checked && !profile.unlocked.includes(map.id),
-      card = document.createElement("button");
-    card.className = `map-card${map.id === menuMap ? " selected" : ""}${locked && menuMode !== "creative" ? " map-locked" : ""}`;
-    card.dataset.map = map.id;
-    card.setAttribute("aria-pressed", String(map.id === menuMap));
-    const preview = svg("svg", {
-      viewBox: "0 0 1100 570",
-      "aria-hidden": true,
-    });
-    preview.classList.add("map-thumbnail");
-    svg("rect", { width: 1100, height: 570, fill: "var(--map)" }, preview);
-    const terrain = svg("g", {}, preview);
-    renderTerrain(terrain, map, true);
-    const nodes = new Map();
-    (PREVIEWS[map.id] ?? []).forEach((points, i) => {
-      svg(
-        "polyline",
-        {
-          points: points.map(([x, y]) => `${x * 11},${y * 5.7}`).join(" "),
-          fill: "none",
-          stroke: map.colors[i],
-          "stroke-width": 14,
-          "stroke-linejoin": "round",
-        },
-        preview,
-      );
-      for (const [index, point] of points.entries())
-        if (index === 0 || index === points.length - 1) {
-          const key = point.join(",");
-          nodes.set(key, {
-            point,
-            connections: (nodes.get(key)?.connections ?? 0) + 1,
-          });
-        }
-    });
-    let index = 0;
-    for (const {
-      point: [x, y],
-      connections,
-    } of nodes.values()) {
-      shape(
-        connections > 1 ? "square" : index++ % 3 === 0 ? "triangle" : "circle",
-        x * 11,
-        y * 5.7,
-        17,
-        preview,
-        { fill: "var(--station)", stroke: "var(--ink)", "stroke-width": 7 },
-      );
-    }
-    card.append(preview);
-    const name = document.createElement("strong");
-    name.textContent = `${map.name}${locked && menuMode !== "creative" ? " 🔒" : ""}`;
-    card.append(name);
-    const info = document.createElement("small");
-    info.textContent = `${map.maxLines}개 노선 · 정원 ${map.stationCapacity}명`;
-    card.append(info);
-    card.onclick = () => {
-      menuMap = map.id;
-      renderMenu();
-    };
-    $("map-cards").append(card);
-  }
-  const map = getMap(menuMap),
-    locked =
-      !$("custom-layout").checked &&
-      menuMode !== "creative" &&
-      !profile.unlocked.includes(map.id),
-    extremeLocked =
-      !$("custom-layout").checked &&
-      menuMode === "extreme" &&
-      !profile.extreme.includes(map.id);
-  $("selected-map-title").textContent = `${map.name} / ${map.en}`;
-  $("selected-map-details").textContent =
-    `시작 노선 ${map.startLines}개 · 열차 ${map.startLines}대 · ${map.crossing === "bridge" ? "다리" : "터널"} ${map.tunnels}개${map.startCarriages ? ` · 객차 ${map.startCarriages}개` : ""} / 노선당 최대 열차 ${map.maxTrains}대 · 한 칸 ${map.seats}인승`;
-  $("selected-map-challenge").textContent =
-    `◈ ${CHALLENGES[map.challenge]}${map.challengeScore ? ` · ${map.challengeScore}명 수송` : ""}${profile.extreme.includes(map.id) ? " ✓ 달성" : ""}`;
-  const prerequisites = MAPS.filter((m) => m.next.includes(map.id))
-    .map((m) => `${m.name} ${m.goal}명`)
-    .join(" 또는 ");
-  $("unlock-reason").textContent = locked
-    ? `해금 조건: ${prerequisites || "앞 도시의 수송 목표 달성"}. 크리에이티브에서는 미리 체험할 수 있습니다.`
-    : extremeLocked
-      ? "일반 모드에서 위 챌린지를 달성하면 익스트림이 열립니다."
-      : `◇ ${map.goal}명 수송${map.next.length ? ` → ${map.next.map((id) => getMap(id).name).join(", ")} 해금` : ""}`;
-  $("start-game").disabled = locked || extremeLocked;
-  $("start-game").textContent = $("custom-layout").checked
-    ? "설계 시작 →"
-    : "운행 시작 →";
-  if ($("custom-layout").checked)
-    $("unlock-reason").textContent =
-      "자유 설계 · 자동 역 생성 없음 · 원작 지도 해금과 별도 기록";
-  $("challenge-label").hidden = menuMode !== "normal";
-}
-$("start-game").onclick = startGame;
 $("station-shape").onchange = () => {
   tool = "place";
   pendingInsert = null;
   updateTools();
 };
-$("custom-layout").onchange = renderMenu;
-$("map-menu").onclick = openMenu;
 $("menu").onclick = showHome;
 $("home-new").onclick = () => {
-  $("custom-layout").checked = false;
-  renderMenu();
-  $("menu-dialog").showModal();
+  const previous = profile.lastCity ?? (hasSaved ? game.mapId : "london");
+  menuMap = nextPlayableCity(
+    previous,
+    profile.best[`${previous}:normal`] ?? 0,
+    profile.unlocked,
+  );
+  startGame();
 };
 $("home-continue").onclick = () => {
   $("home-screen").hidden = true;
@@ -1518,45 +1385,15 @@ function showHome() {
   $("home-continue").hidden = !hasSaved;
 }
 
-$("close-menu").onclick = () => {
-  $("menu-dialog").close();
-  if (document.body.classList.contains("at-home")) return;
-  syncStateDialogs();
-};
-$("menu-dialog").addEventListener("cancel", () => {
-  requestAnimationFrame(syncStateDialogs);
-});
-
-document.querySelectorAll("[data-mode]").forEach(
-  (b) =>
-    (b.onclick = () => {
-      menuMode = b.dataset.mode;
-      renderMenu();
-    }),
-);
 $("retry-game").onclick = () => {
-  $("custom-layout").checked = Boolean(game.customLayout);
-  menuMap = game.mapId;
-  menuMode = game.mode;
+  menuMap = nextPlayableCity(
+    game.mapId,
+    game.mode === "normal" ? game.score : 0,
+    profile.unlocked,
+  );
   startGame();
 };
-$("over-menu").onclick = () => {
-  $("over-dialog").close();
-  openMenu();
-};
-for (const [id, mode] of [
-  ["continue-endless", "endless"],
-  ["continue-creative", "creative"],
-])
-  $(id).onclick = () => {
-    continueAs(game, mode);
-    $("over-dialog").close();
-    overShown = false;
-    tool = "connect";
-    initializeMap();
-    render();
-    save();
-  };
+$("over-menu").onclick = showHome;
 for (const id of ["upgrade-dialog", "over-dialog"])
   $(id).addEventListener("cancel", (e) => e.preventDefault());
 $("clock-button").onclick = () => {
@@ -1691,7 +1528,6 @@ $("design-banner").after($("creative-tools"));
 initializeMap();
 render();
 applySettings();
-renderMenu();
 $("home-continue").hidden = !hasSaved;
 if (game.planning) tool = "place";
 updateTools();

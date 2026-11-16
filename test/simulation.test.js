@@ -592,3 +592,34 @@ test("expanded networks with more than two hundred stations can be restored", ()
   for (let i = 0; i < 205; i++) addStation(g, "circle", 1200 + i * 70, 100);
   assert.equal(validSavedGame(JSON.parse(JSON.stringify(g))), true);
 });
+
+test("startup automatically keeps the current city before its goal", async () => {
+  const { nextPlayableCity } = await import("../maps.js");
+  assert.equal(
+    nextPlayableCity("london", 0, ["london", "paris", "newyork"]),
+    "london",
+  );
+  assert.equal(
+    nextPlayableCity("paris", 199, ["london", "paris", "newyork"]),
+    "paris",
+  );
+});
+test("a completed city automatically advances only to an unlocked successor", async () => {
+  const { nextPlayableCity } = await import("../maps.js");
+  assert.equal(
+    nextPlayableCity("london", 200, ["london", "paris", "newyork", "warsaw"]),
+    "warsaw",
+  );
+  assert.equal(
+    nextPlayableCity("london", 200, ["london", "paris", "newyork"]),
+    "london",
+  );
+});
+test("unknown or unavailable saved city preferences fall back to London", async () => {
+  const { nextPlayableCity } = await import("../maps.js");
+  assert.equal(nextPlayableCity("not-a-city", 0, ["london"]), "london");
+  assert.equal(
+    nextPlayableCity("seoul", 0, ["london", "paris", "newyork"]),
+    "london",
+  );
+});

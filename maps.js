@@ -2085,3 +2085,13 @@ const hues = {
 };
 for (const map of MAPS)
   if (hues[map.id]) map.colors = [...hues[map.id], ...map.colors].slice(0, 7);
+
+// Startup is automatic: stay in the current city until its transport goal is met.
+export function nextPlayableCity(cityId, score, unlocked) {
+  const current = getMap(cityId);
+  if (score >= current.goal) {
+    const next = current.next.find((id) => unlocked.includes(id));
+    if (next) return next;
+  }
+  return unlocked.includes(current.id) ? current.id : "london";
+}
