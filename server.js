@@ -22,6 +22,8 @@ http
           "game.js",
           "simulation.js",
           "maps.js",
+          "motion.js",
+          "theme.js",
         ].includes(file)
       ) {
         res.writeHead(404);

@@ -1,3 +1,5 @@
+import { readableLineColor } from "./theme.js?v=9";
+import { smoothAngle, cameraAt } from "./motion.js?v=9";
 import {
   MAPS,
   getMap,
@@ -7,7 +9,7 @@ import {
   cityUnlocked,
   canStartCity,
   cityRequirement,
-} from "./maps.js?v=7";
+} from "./maps.js?v=9";
 import {
   BASIC,
   SPECIAL,
@@ -45,7 +47,7 @@ import {
   launchDesign,
   moveStation,
   canDesign,
-} from "./simulation.js?v=7";
+} from "./simulation.js?v=9";
 
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
@@ -62,7 +64,7 @@ let profile = {
   extreme: [],
   vintage: [],
   best: {},
-  settings: { night: false, accessible: false, sound: false, volume: 30 },
+  settings: { night: true, accessible: false, sound: false, volume: 30 },
 };
 let game,
   selected = 0,
@@ -84,6 +86,20 @@ let view = { x: 0, y: 0, w: 1100, h: 570 },
   last = 0,
   visual = 0,
   savedAt = 0;
+const trainNodes = new Map(),
+  stationNodes = new Map();
+let routeSignature = "",
+  lineSignature = "",
+  previewSignature = "",
+  endpointSignature = "",
+  cameraTween = null,
+  pendingPointerMove = null;
+const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+const reducedMotion = () => motionPreference.matches;
+let viewGestureDirty = false,
+  pinch = null,
+  pinchSuppressed = false;
+const touchPoints = new Map();
 let storageAvailable = true,
   overShown = false,
   hasSaved = false;
@@ -122,6 +138,10 @@ try {
   }
 } catch {
   /* Missing, old or malformed local data starts a clean game. */
+}
+if (profile.settings.paletteVersion !== "graphite-v1") {
+  profile.settings.night = true;
+  profile.settings.paletteVersion = "graphite-v1";
 }
 game ??= createGame("normal", Math.random, "london");
 
@@ -271,21 +291,32 @@ function save() {
       "브라우저 저장 공간을 사용할 수 없습니다. 이 탭을 닫으면 진행 상황이 사라집니다.";
   }
 }
+let paletteKey = "",
+  paletteValue = [];
 function colors() {
-  return profile.settings.accessible
-    ? [
-        "#0072b2",
-        "#d55e00",
-        "#009e73",
-        "#cc79a7",
-        "#e6ab02",
-        "#6b62a1",
-        "#444444",
-      ]
-    : getMap(game.mapId).colors;
+  const key = `${game.mapId}:${profile.settings.accessible}:${profile.settings.night}`;
+  if (key !== paletteKey) {
+    paletteKey = key;
+    const values = profile.settings.accessible
+      ? [
+          "#0072b2",
+          "#d55e00",
+          "#009e73",
+          "#cc79a7",
+          "#e6ab02",
+          "#6b62a1",
+          "#444444",
+        ]
+      : getMap(game.mapId).colors;
+    paletteValue = values.map((color) =>
+      readableLineColor(color, profile.settings.night),
+    );
+  }
+  return paletteValue;
 }
 function applySettings() {
   document.body.classList.toggle("night", Boolean(profile.settings.night));
+  document.body.classList.toggle("day", !profile.settings.night);
   $("night-mode").checked = Boolean(profile.settings.night);
   $("accessible-colors").checked = Boolean(profile.settings.accessible);
   $("sound-setting").checked = Boolean(profile.settings.sound);
@@ -371,20 +402,36 @@ function renderTerrain(
     label.textContent = "H A N   R I V E R";
   }
 }
-function fitMap() {
+function fitMap(animate = false) {
   const xs = game.stations.map((s) => s.x),
     ys = game.stations.map((s) => s.y);
   const minX = Math.min(-60, ...xs.map((x) => x - 80)),
     maxX = Math.max(1160, ...xs.map((x) => x + 80));
   const minY = Math.min(-35, ...ys.map((y) => y - 75)),
     maxY = Math.max(605, ...ys.map((y) => y + 75));
-  view = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-  applyView();
+  const target = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  if (animate) animateCamera(target);
+  else {
+    cameraTween = null;
+    view = target;
+    applyView();
+  }
 }
 function applyView() {
   $("map").setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
 }
 function renderRoutes() {
+  const key = JSON.stringify([
+    game.mapId,
+    game.lines,
+    game.stations.map((s) => [s.x, s.y]),
+    game.trains.map((t) => [t.id, t.from, t.to]),
+    selected,
+    tool,
+    colors(),
+  ]);
+  if (routeSignature === key) return;
+  routeSignature = key;
   $("routes").replaceChildren();
   $("ghost-routes").replaceChildren();
   const palette = colors();
@@ -528,42 +575,54 @@ function symbolScale() {
   return Math.max(1, 0.7 / ($("map").getScreenCTM()?.a || 1));
 }
 function renderStations() {
-  $("stations").replaceChildren();
-  $("previews").replaceChildren();
-  if (game.preview)
-    shape(
-      game.preview.shape,
-      game.preview.x,
-      game.preview.y,
-      12,
-      $("previews"),
-      {
-        class: "station-shape",
-        opacity: 0.25,
-        fill: "var(--map)",
-        stroke: "var(--ink)",
-        "stroke-width": 2,
-      },
-    );
+  const previewKey = JSON.stringify(game.preview);
+  if (previewKey !== previewSignature) {
+    previewSignature = previewKey;
+    $("previews").replaceChildren();
+    if (game.preview)
+      shape(
+        game.preview.shape,
+        game.preview.x,
+        game.preview.y,
+        12,
+        $("previews"),
+        {
+          class: "station-shape",
+          opacity: 0.25,
+          fill: "var(--map)",
+          stroke: "var(--ink)",
+          "stroke-width": 2,
+        },
+      );
+  }
+  const alive = new Set();
   for (const s of game.stations) {
-    const g = svg(
-      "g",
-      {
-        class: "station",
-        transform: `translate(${s.x} ${s.y}) scale(${symbolScale()}) translate(${-s.x} ${-s.y})`,
-        "data-station": s.id,
-        role: "button",
-        tabindex: 0,
-        "aria-label": `${s.name} ${s.shape}, 대기 ${s.waiting.length}명, 정원 ${capacity(s)}명`,
-      },
-      $("stations"),
-    );
+    alive.add(s.id);
+    const key = JSON.stringify([
+      game.mapId,
+      s.name,
+      s.shape,
+      s.x,
+      s.y,
+      s.interchange,
+      s.waiting,
+    ]);
+    const existing = stationNodes.get(s.id);
+    if (existing?.key === key && existing.node.isConnected) continue;
+    const g = svg("g", {
+      class: existing ? "station" : "station station-arrival",
+      transform: `translate(${s.x} ${s.y}) scale(${symbolScale()}) translate(${-s.x} ${-s.y})`,
+      "data-station": s.id,
+      role: "button",
+      tabindex: 0,
+      "aria-label": `${s.name} ${s.shape}, 대기 ${s.waiting.length}명, 정원 ${capacity(s)}명`,
+    });
     svg(
       "circle",
       { cx: s.x, cy: s.y, r: 24, fill: "transparent", "pointer-events": "all" },
       g,
     );
-    if (s.crowded > 0) {
+    {
       const radius = s.interchange ? 24 : 21,
         circumference = 2 * Math.PI * radius;
       svg(
@@ -573,6 +632,7 @@ function renderStations() {
           cy: s.y,
           r: radius,
           fill: "none",
+          class: "crowd-track",
           stroke: "var(--crowd-track)",
           "stroke-width": 5,
         },
@@ -585,6 +645,7 @@ function renderStations() {
           cy: s.y,
           r: radius,
           fill: "none",
+          class: "crowd-progress",
           stroke: "#db6354",
           "stroke-width": 5,
           "stroke-dasharray": `${(circumference * s.crowded) / RULES.crowdSeconds} ${circumference}`,
@@ -638,7 +699,21 @@ function renderStations() {
       );
       count.textContent = `+${s.waiting.length - 24}`;
     }
+    if (existing?.node.isConnected) existing.node.replaceWith(g);
+    else $("stations").append(g);
+    stationNodes.set(s.id, {
+      key,
+      node: g,
+      track: g.querySelector(".crowd-track"),
+      ring: g.querySelector(".crowd-progress"),
+    });
   }
+  for (const [id, entry] of stationNodes)
+    if (!alive.has(id)) {
+      entry.node.remove();
+      stationNodes.delete(id);
+    }
+  updateCrowding();
 }
 function trainPoint(train) {
   const a = game.stations[train.from];
@@ -653,34 +728,67 @@ function trainPoint(train) {
   }
   return p;
 }
-function drawTrains() {
-  $("trains").replaceChildren();
+function drawTrains(now = performance.now()) {
+  const alive = new Set(),
+    palette = colors(),
+    scale = symbolScale();
   for (const train of game.trains) {
-    const point = trainPoint(train),
-      g = svg(
-        "g",
-        {
-          "data-train": train.id,
-          class: "train",
-          transform: `translate(${point.x} ${point.y}) scale(${symbolScale()}) translate(${-point.x} ${-point.y})`,
-          role: "button",
-          tabindex: 0,
-          "aria-label": `열차 ${train.id}, ${train.passengers.length}/${trainCapacity(train)}명, 객차 ${train.carriages}개`,
-        },
-        $("trains"),
-      );
-    const angle = (point.angle * Math.PI) / 180;
-    // Long creative trains show the first 12 cars and an explicit remaining-car count.
+    alive.add(train.id);
+    let entry = trainNodes.get(train.id);
+    if (!entry || !entry.node.isConnected) {
+      entry = {
+        node: svg(
+          "g",
+          {
+            "data-train": train.id,
+            class: "train",
+            role: "button",
+            tabindex: 0,
+          },
+          $("trains"),
+        ),
+        angle: NaN,
+        last: now,
+        key: null,
+      };
+      trainNodes.set(train.id, entry);
+    }
+    const point = trainPoint(train);
+    entry.angle = smoothAngle(
+      entry.angle,
+      point.angle,
+      Math.min(0.1, Math.max(0, (now - entry.last) / 1000)),
+      reducedMotion(),
+    );
+    entry.last = now;
+    entry.node.setAttribute(
+      "transform",
+      `translate(${point.x} ${point.y}) rotate(${entry.angle}) scale(${scale})`,
+    );
+    const key = JSON.stringify([
+      train.line,
+      train.type,
+      train.carriages,
+      train.seats,
+      train.passengers,
+      palette[train.line],
+      train.pendingMove?.line,
+    ]);
+    if (entry.key === key) continue;
+    entry.key = key;
+    entry.node.replaceChildren();
+    entry.node.setAttribute(
+      "aria-label",
+      `열차 ${train.id}, ${train.passengers.length}/${trainCapacity(train)}명, 객차 ${train.carriages}개`,
+    );
     for (let car = Math.min(train.carriages, 11); car >= 0; car--) {
-      const x = point.x - Math.cos(angle) * car * 23,
-        y = point.y - Math.sin(angle) * car * 23;
       const body = svg(
         "g",
-        { transform: `translate(${x} ${y}) rotate(${point.angle})` },
-        g,
+        { transform: `translate(${-car * 23} 0)` },
+        entry.node,
       );
       const attrs = {
-        fill: colors()[train.line],
+        fill: palette[train.line],
         stroke: "var(--station)",
         "stroke-width": 1.3,
         opacity: train.pendingMove?.line === null ? 0.55 : 1,
@@ -704,28 +812,59 @@ function drawTrains() {
     }
     svg(
       "circle",
-      {
-        cx: point.x,
-        cy: point.y,
-        r: 15,
-        fill: "transparent",
-        "pointer-events": "all",
-      },
-      g,
+      { cx: 0, cy: 0, r: 15, fill: "transparent", "pointer-events": "all" },
+      entry.node,
     );
     if (train.carriages > 11) {
-      const text = svg(
+      const label = svg(
         "text",
-        {
-          x: point.x + 17,
-          y: point.y - 12,
-          "font-size": 9,
-          fill: "var(--ink)",
-        },
-        g,
+        { x: 17, y: -12, "font-size": 9, fill: "var(--ink)" },
+        entry.node,
       );
-      text.textContent = `+${train.carriages - 11}`;
+      label.textContent = `+${train.carriages - 11}`;
     }
+  }
+  for (const [id, entry] of trainNodes)
+    if (!alive.has(id)) {
+      entry.node.remove();
+      trainNodes.delete(id);
+    }
+}
+function updateCrowding() {
+  const scale = symbolScale(),
+    endpointKey = routeSignature + ":" + scale;
+  if (endpointKey !== endpointSignature) {
+    endpointSignature = endpointKey;
+    for (const node of $("routes").querySelectorAll(
+      ".endpoint[data-station]",
+    )) {
+      const station = game.stations[Number(node.dataset.station)];
+      if (station)
+        node.setAttribute(
+          "transform",
+          `translate(${station.x} ${station.y}) scale(${scale}) translate(${-station.x} ${-station.y})`,
+        );
+    }
+  }
+  for (const station of game.stations) {
+    const entry = stationNodes.get(station.id);
+    if (!entry) continue;
+    if (entry.scale !== scale) {
+      entry.scale = scale;
+      entry.node.setAttribute(
+        "transform",
+        `translate(${station.x} ${station.y}) scale(${scale}) translate(${-station.x} ${-station.y})`,
+      );
+    }
+    if (entry.crowded === station.crowded) continue;
+    entry.crowded = station.crowded;
+    const circumference = 2 * Math.PI * (station.interchange ? 24 : 21);
+    entry.track.style.opacity = entry.ring.style.opacity =
+      station.crowded > 0 ? "1" : "0";
+    entry.ring.setAttribute(
+      "stroke-dasharray",
+      `${(circumference * station.crowded) / RULES.crowdSeconds} ${circumference}`,
+    );
   }
 }
 function render() {
@@ -781,23 +920,33 @@ function render() {
     !canDesign(game) || Boolean(game.planning);
   $("map-details").textContent =
     `최대 ${map.maxLines}개 노선 · 역 정원 ${map.stationCapacity}명`;
-  $("lines").replaceChildren();
-  for (let i = 0; i < map.maxLines; i++) {
-    const b = document.createElement("button");
-    b.className = `line-button${i === selected ? " selected" : ""}${i >= game.unlocked ? " locked" : ""}`;
-    b.style.setProperty("--line", colors()[i]);
-    b.textContent = i < game.unlocked ? String(i + 1) : "·";
-    b.title =
-      i < game.unlocked
-        ? `${i + 1}호선 · ${game.lines[i].stations.length}개 역`
-        : "주간 보상으로 해금";
-    b.setAttribute(
-      "aria-label",
-      `${i + 1}호선${i >= game.unlocked ? " 잠김" : ""}`,
-    );
-    b.setAttribute("aria-pressed", String(i === selected));
-    b.onclick = () => chooseLine(i);
-    $("lines").append(b);
+  const lineKey = JSON.stringify([
+    game.mapId,
+    game.unlocked,
+    selected,
+    game.lines.map((l) => l.stations.length),
+    colors(),
+  ]);
+  if (lineSignature !== lineKey) {
+    lineSignature = lineKey;
+    $("lines").replaceChildren();
+    for (let i = 0; i < map.maxLines; i++) {
+      const b = document.createElement("button");
+      b.className = `line-button${i === selected ? " selected" : ""}${i >= game.unlocked ? " locked" : ""}`;
+      b.style.setProperty("--line", colors()[i]);
+      b.textContent = i < game.unlocked ? String(i + 1) : "·";
+      b.title =
+        i < game.unlocked
+          ? `${i + 1}호선 · ${game.lines[i].stations.length}개 역`
+          : "주간 보상으로 해금";
+      b.setAttribute(
+        "aria-label",
+        `${i + 1}호선${i >= game.unlocked ? " 잠김" : ""}`,
+      );
+      b.setAttribute("aria-pressed", String(i === selected));
+      b.onclick = () => chooseLine(i);
+      $("lines").append(b);
+    }
   }
   const count = (key) => (game.mode === "creative" ? "∞" : game.stock[key]);
   $("stock-trains").textContent = count("locomotives");
@@ -905,8 +1054,77 @@ function nearestStation(p) {
       .sort((a, b) => a.d - b.d)[0]?.id ?? null
   );
 }
+$("map").addEventListener(
+  "pointerdown",
+  (event) => {
+    if (event.pointerType !== "touch") return;
+    touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (touchPoints.size < 2) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    pendingPointerMove = null;
+    cameraTween = null;
+    gesture = { pinch: true };
+    $("drag-preview").replaceChildren();
+    manualView = true;
+    const [a, b] = [...touchPoints.values()];
+    pinch = {
+      distance: Math.hypot(a.x - b.x, a.y - b.y),
+      view: { ...view },
+      anchor: mapPoint({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 }),
+    };
+    pinchSuppressed = true;
+  },
+  { capture: true, passive: false },
+);
+window.addEventListener(
+  "pointermove",
+  (event) => {
+    if (!touchPoints.has(event.pointerId)) return;
+    touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (!pinch && !pinchSuppressed) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!pinch || touchPoints.size < 2) return;
+    const [a, b] = [...touchPoints.values()],
+      distance = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+    const w = Math.min(
+      Math.max(1700, pinch.view.w * 3),
+      Math.max(250, (pinch.view.w * pinch.distance) / distance),
+    );
+    view = { ...pinch.view, w, h: (pinch.view.h * w) / pinch.view.w };
+    applyView();
+    const under = mapPoint({
+      clientX: (a.x + b.x) / 2,
+      clientY: (a.y + b.y) / 2,
+    });
+    view.x += pinch.anchor.x - under.x;
+    view.y += pinch.anchor.y - under.y;
+    applyView();
+    viewGestureDirty = true;
+  },
+  { capture: true, passive: false },
+);
+function finishTouch(event) {
+  if (!touchPoints.has(event.pointerId)) return;
+  touchPoints.delete(event.pointerId);
+  if (!pinch && !pinchSuppressed) return;
+  event.stopImmediatePropagation();
+  if (touchPoints.size < 2) {
+    pinch = null;
+    gesture = null;
+    pendingPointerMove = null;
+  }
+  if (!touchPoints.size) {
+    pinchSuppressed = false;
+    render();
+  }
+}
+window.addEventListener("pointerup", finishTouch, true);
+window.addEventListener("pointercancel", finishTouch, true);
 $("map").addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
+  cameraTween = null;
   const station = event.target.closest("[data-station]"),
     train = event.target.closest("[data-train]"),
     edge = event.target.closest("[data-edge]");
@@ -1034,7 +1252,7 @@ $("map").addEventListener("pointerdown", (event) => {
     clientY: event.clientY,
   };
 });
-window.addEventListener("pointermove", (event) => {
+function updateDragPreview(event) {
   if (!gesture) return;
   const p = mapPoint(event);
   if (gesture.editStation !== undefined) {
@@ -1135,7 +1353,6 @@ window.addEventListener("pointermove", (event) => {
     return;
   }
   if (tool === "connect" && gesture.station !== undefined) {
-    collectDragStations(gesture, p);
     $("drag-preview").replaceChildren();
     const stops = gesture.path.map((id) => game.stations[id]);
     const target = nearestStation(p);
@@ -1182,8 +1399,23 @@ window.addEventListener("pointermove", (event) => {
       { fill: "var(--station)", stroke: "var(--ink)", "stroke-width": 2 },
     );
   }
+}
+
+window.addEventListener("pointermove", (event) => {
+  if (!gesture) return;
+  if (tool === "connect" && gesture.station !== undefined && gesture.path)
+    collectDragStations(gesture, mapPoint(event));
+  pendingPointerMove = event;
 });
+function flushDragPreview() {
+  if (pendingPointerMove) {
+    const event = pendingPointerMove;
+    pendingPointerMove = null;
+    updateDragPreview(event);
+  }
+}
 window.addEventListener("pointerup", (event) => {
+  flushDragPreview();
   if (!gesture) return;
   const old = gesture;
   gesture = null;
@@ -1291,6 +1523,7 @@ window.addEventListener("pointerup", (event) => {
   }
 });
 window.addEventListener("pointercancel", () => {
+  pendingPointerMove = null;
   gesture = null;
   $("drag-preview").replaceChildren();
 });
@@ -1571,19 +1804,22 @@ $("fullscreen").onclick = async () => {
   }
 };
 function zoom(factor) {
-  const w = Math.max(250, Math.min(1700, view.w * factor)),
-    h = (view.h * w) / view.w;
-  view = { x: view.x + (view.w - w) / 2, y: view.y + (view.h - h) / 2, w, h };
+  const base = cameraTween?.to ?? view;
+  const w = Math.max(250, Math.min(1700, base.w * factor)),
+    h = (base.h * w) / base.w;
   manualView = true;
-  applyView();
-  render();
+  animateCamera({
+    x: base.x + (base.w - w) / 2,
+    y: base.y + (base.h - h) / 2,
+    w,
+    h,
+  });
 }
 $("zoom-in").onclick = () => zoom(0.85);
 $("zoom-out").onclick = () => zoom(1 / 0.85);
 $("zoom-fit").onclick = () => {
   manualView = false;
-  fitMap();
-  render();
+  fitMap(true);
 };
 window.addEventListener("keydown", (e) => {
   if (
@@ -1618,6 +1854,10 @@ document.addEventListener("visibilitychange", () => {
   last = performance.now();
 });
 function frame(now) {
+  const cameraMoved = advanceCamera(now) || viewGestureDirty;
+  viewGestureDirty = false;
+  let sceneUpdated = false;
+  flushDragPreview();
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   if (
@@ -1644,7 +1884,7 @@ function frame(now) {
     renderCoach();
     for (const event of game.events) {
       if (event.type === "station") {
-        if (!manualView) fitMap();
+        if (!manualView) fitMap(true);
         toast(
           `${game.stations[event.id]?.name ?? "새 역"} 개통 · 노선을 연결하세요.`,
         );
@@ -1665,10 +1905,16 @@ function frame(now) {
       render();
       visual = 0;
     } else drawTrains();
+    updateCrowding();
+    sceneUpdated = true;
     if (now - savedAt > 3000) {
       save();
       savedAt = now;
     }
+  }
+  if (cameraMoved && !sceneUpdated) {
+    drawTrains(now);
+    updateCrowding();
   }
   requestAnimationFrame(frame);
 }
@@ -1887,7 +2133,7 @@ function renderCities() {
         {
           points: points.map(([x, y]) => `${x * 11},${y * 5.7}`).join(" "),
           fill: "none",
-          stroke: map.colors[i],
+          stroke: readableLineColor(map.colors[i], profile.settings.night),
           "stroke-width": 14,
         },
         preview,
@@ -2147,3 +2393,30 @@ $("coach-close").onclick = () => {
   $("coach").hidden = true;
   save();
 };
+
+function animateCamera(target) {
+  if (reducedMotion()) {
+    cameraTween = null;
+    view = target;
+    applyView();
+    render();
+    return;
+  }
+  cameraTween = {
+    from: { ...view },
+    to: target,
+    start: performance.now(),
+    duration: 320,
+  };
+}
+function advanceCamera(now) {
+  if (!cameraTween) return false;
+  const progress = (now - cameraTween.start) / cameraTween.duration;
+  view = cameraAt(cameraTween.from, cameraTween.to, progress);
+  applyView();
+  if (progress >= 1) {
+    cameraTween = null;
+    render();
+  }
+  return true;
+}
