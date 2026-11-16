@@ -7,7 +7,7 @@ import {
   cityUnlocked,
   canStartCity,
   cityRequirement,
-} from "./maps.js?v=6";
+} from "./maps.js?v=7";
 import {
   BASIC,
   SPECIAL,
@@ -45,7 +45,7 @@ import {
   launchDesign,
   moveStation,
   canDesign,
-} from "./simulation.js?v=6";
+} from "./simulation.js?v=7";
 
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
@@ -71,6 +71,7 @@ let game,
   tool = "connect",
   pendingInsert = null,
   endpoint = "back";
+let challengeRun = false;
 let cityMode = "normal",
   tutorialActive = false;
 let menuMap = "london",
@@ -115,7 +116,6 @@ try {
   const saved = JSON.parse(localStorage.getItem(SAVE));
   if (validSavedGame(saved)) {
     game = saved;
-    game.challengeMode = false;
     game.events = [];
     hasSaved = true;
     menuMap = game.mapId;
@@ -372,23 +372,13 @@ function renderTerrain(
   }
 }
 function fitMap() {
-  if (
-    !game.stations.length ||
-    (game.planning && !manualView) ||
-    (game.mode === "creative" && window.innerWidth > 700)
-  )
-    view = { x: 0, y: 0, w: 1100, h: 570 };
-  else {
-    const xs = game.stations.map((s) => s.x),
-      ys = game.stations.map((s) => s.y);
-    const minX = Math.min(...xs) - 100,
-      maxX = Math.max(...xs) + 100,
-      minY = Math.min(...ys) - 90,
-      maxY = Math.max(...ys) + 90;
-    const w = Math.max(window.innerWidth < 700 ? 420 : 540, maxX - minX),
-      h = Math.max(310, maxY - minY);
-    view = { x: (maxX + minX - w) / 2, y: (maxY + minY - h) / 2, w, h };
-  }
+  const xs = game.stations.map((s) => s.x),
+    ys = game.stations.map((s) => s.y);
+  const minX = Math.min(-60, ...xs.map((x) => x - 80)),
+    maxX = Math.max(1160, ...xs.map((x) => x + 80));
+  const minY = Math.min(-35, ...ys.map((y) => y - 75)),
+    maxY = Math.max(605, ...ys.map((y) => y + 75));
+  view = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   applyView();
 }
 function applyView() {
@@ -396,7 +386,6 @@ function applyView() {
 }
 function renderRoutes() {
   $("routes").replaceChildren();
-  $("edit-handles").replaceChildren();
   $("ghost-routes").replaceChildren();
   const palette = colors();
   game.lines.forEach((line, lineId) => {
@@ -451,67 +440,6 @@ function renderRoutes() {
           group,
         );
     });
-    if (
-      lineId === selected &&
-      line.stations.length >= 3 &&
-      !(game.mode === "extreme" && !game.planning)
-    ) {
-      const middle = line.loop ? line.stations : line.stations.slice(1, -1);
-      for (const id of middle) {
-        const station = game.stations[id];
-        const handle = svg(
-          "g",
-          {
-            "data-edit-station": id,
-            "data-edit-line": lineId,
-            class: "middle-handle",
-            tabindex: 0,
-            role: "button",
-            "aria-label": `${station.name} 노선 편집. 다른 역으로 드래그하면 교체, 빈 곳에 놓으면 제외. Delete로 제외.`,
-          },
-          $("edit-handles"),
-        );
-        const title = svg("title", {}, handle);
-        title.textContent = "중간역 편집: 끌어서 교체 · 빈 곳으로 빼서 제외";
-        svg(
-          "line",
-          {
-            x1: station.x + 8,
-            y1: station.y + 8,
-            x2: station.x + 20,
-            y2: station.y + 20,
-            stroke: palette[lineId],
-            "stroke-width": 2,
-            opacity: 0.7,
-          },
-          handle,
-        );
-        svg(
-          "circle",
-          {
-            cx: station.x + 20,
-            cy: station.y + 20,
-            r: 11,
-            fill: "transparent",
-            "pointer-events": "all",
-          },
-          handle,
-        );
-        svg(
-          "circle",
-          {
-            cx: station.x + 20,
-            cy: station.y + 20,
-            r: 5.5,
-            fill: "var(--station)",
-            stroke: palette[lineId],
-            "stroke-width": 3,
-            "pointer-events": "none",
-          },
-          handle,
-        );
-      }
-    }
     if (!line.loop && line.stations.length >= 2) {
       for (const [id, end] of [
         [line.stations[0], "front"],
@@ -525,6 +453,7 @@ function renderRoutes() {
               "data-end": end,
               "data-handle-line": lineId,
               class: "endpoint",
+              transform: `translate(${s.x} ${s.y}) scale(${symbolScale()}) translate(${-s.x} ${-s.y})`,
             },
             $("routes"),
           );
@@ -595,6 +524,9 @@ function renderRoutes() {
       );
     }
 }
+function symbolScale() {
+  return Math.max(1, 0.7 / ($("map").getScreenCTM()?.a || 1));
+}
 function renderStations() {
   $("stations").replaceChildren();
   $("previews").replaceChildren();
@@ -618,6 +550,7 @@ function renderStations() {
       "g",
       {
         class: "station",
+        transform: `translate(${s.x} ${s.y}) scale(${symbolScale()}) translate(${-s.x} ${-s.y})`,
         "data-station": s.id,
         role: "button",
         tabindex: 0,
@@ -729,6 +662,7 @@ function drawTrains() {
         {
           "data-train": train.id,
           class: "train",
+          transform: `translate(${point.x} ${point.y}) scale(${symbolScale()}) translate(${-point.x} ${-point.y})`,
           role: "button",
           tabindex: 0,
           "aria-label": `열차 ${train.id}, ${train.passengers.length}/${trainCapacity(train)}명, 객차 ${train.carriages}개`,
@@ -965,28 +899,17 @@ function mapPoint(event) {
 }
 function nearestStation(p) {
   return (
-    game.stations.find((s) => Math.hypot(s.x - p.x, s.y - p.y) < 26)?.id ?? null
+    game.stations
+      .map((s) => ({ id: s.id, d: Math.hypot(s.x - p.x, s.y - p.y) }))
+      .filter((s) => s.d < 26 * symbolScale())
+      .sort((a, b) => a.d - b.d)[0]?.id ?? null
   );
 }
 $("map").addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
-  const edit = event.target.closest("[data-edit-station]");
   const station = event.target.closest("[data-station]"),
     train = event.target.closest("[data-train]"),
     edge = event.target.closest("[data-edge]");
-  if (edit) {
-    event.preventDefault();
-    selected = Number(edit.dataset.editLine);
-    tool = "connect";
-    gesture = {
-      editStation: Number(edit.dataset.editStation),
-      line: selected,
-      point: mapPoint(event),
-      clientX: event.clientX,
-      clientY: event.clientY,
-    };
-    return;
-  }
   if (train) {
     event.preventDefault();
     gesture = {
@@ -1006,6 +929,27 @@ $("map").addEventListener("pointerdown", (event) => {
       pendingInsert = null;
     }
     const origin = Number(station.dataset.station);
+    if (tool === "connect" && !station.dataset.end) {
+      const line = game.lines[selected],
+        index = line.stations.indexOf(origin);
+      if (
+        index >= 0 &&
+        (line.loop || (index > 0 && index < line.stations.length - 1))
+      ) {
+        if (game.mode === "extreme" && !game.planning) {
+          toast("익스트림에서는 중간 노선을 수정할 수 없습니다.");
+          return;
+        }
+        gesture = {
+          editStation: origin,
+          line: selected,
+          point: p,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        };
+        return;
+      }
+    }
     if (tool === "connect" && !station.dataset.end) {
       const line = game.lines[selected];
       if (
@@ -1034,6 +978,30 @@ $("map").addEventListener("pointerdown", (event) => {
     const line = Number(edge.dataset.line);
     if (line < game.unlocked) {
       selected = line;
+      if (game.mode === "extreme" && !game.planning) {
+        toast("익스트림에서는 끝부분의 연장만 가능합니다.");
+        return;
+      }
+      const route = game.lines[line];
+      const internal = (
+        route.loop ? route.stations : route.stations.slice(1, -1)
+      )
+        .map((id) => ({
+          id,
+          d: Math.hypot(game.stations[id].x - p.x, game.stations[id].y - p.y),
+        }))
+        .filter((hit) => hit.d <= 36)
+        .sort((a, b) => a.d - b.d)[0];
+      if (internal) {
+        gesture = {
+          editStation: internal.id,
+          line,
+          point: p,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        };
+        return;
+      }
       const edgeIndex = Number(edge.dataset.edge);
       pendingInsert = null;
       gesture = {
@@ -1111,11 +1079,31 @@ window.addEventListener("pointermove", (event) => {
           : "이 역으로 연결 변경";
     return;
   }
-  if (
-    gesture.train !== undefined ||
-    gesture.edge !== undefined ||
-    gesture.resource
-  ) {
+  if (gesture.edge !== undefined) {
+    $("drag-preview").replaceChildren();
+    const edge = lineEdges(game.lines[gesture.line])[gesture.edge];
+    if (!edge) return;
+    const id = nearestStation(p),
+      middle = id === null ? { ...p, id: 9999 } : game.stations[id];
+    const points = [
+      ...edgePoints(game.stations[edge[0]], middle),
+      ...edgePoints(middle, game.stations[edge[1]]),
+    ];
+    svg(
+      "polyline",
+      {
+        points: points.map((q) => `${q.x},${q.y}`).join(" "),
+        fill: "none",
+        stroke: colors()[gesture.line],
+        "stroke-width": 6,
+        "stroke-linejoin": "round",
+        opacity: 0.7,
+      },
+      $("drag-preview"),
+    );
+    return;
+  }
+  if (gesture.train !== undefined || gesture.resource) {
     $("drag-preview").replaceChildren();
     svg(
       "circle",
@@ -1307,20 +1295,6 @@ window.addEventListener("pointercancel", () => {
   $("drag-preview").replaceChildren();
 });
 $("map").addEventListener("keydown", (event) => {
-  const edit = event.target.closest("[data-edit-station]");
-  if (edit && ["Delete", "Backspace"].includes(event.key)) {
-    event.preventDefault();
-    event.stopPropagation();
-    notify(
-      removeStation(
-        game,
-        Number(edit.dataset.editLine),
-        Number(edit.dataset.editStation),
-      ),
-    );
-  }
-});
-$("map").addEventListener("keydown", (event) => {
   if (!["Enter", " "].includes(event.key)) return;
   const station = event.target.closest("[data-station]"),
     train = event.target.closest("[data-train]");
@@ -1479,7 +1453,8 @@ function startGame() {
   game = createGame(cityMode, Math.random, menuMap);
   tutorialActive = firstPlay;
   game.tutorial = firstPlay;
-  game.challengeMode = false;
+  game.challengeMode = challengeRun && cityMode === "normal";
+  challengeRun = false;
   profile.lastCity = menuMap;
   selected = 0;
   paused = false;
@@ -1601,12 +1576,14 @@ function zoom(factor) {
   view = { x: view.x + (view.w - w) / 2, y: view.y + (view.h - h) / 2, w, h };
   manualView = true;
   applyView();
+  render();
 }
 $("zoom-in").onclick = () => zoom(0.85);
 $("zoom-out").onclick = () => zoom(1 / 0.85);
 $("zoom-fit").onclick = () => {
   manualView = false;
   fitMap();
+  render();
 };
 window.addEventListener("keydown", (e) => {
   if (
@@ -1633,6 +1610,7 @@ window.addEventListener("keydown", (e) => {
 });
 window.addEventListener("resize", () => {
   if (!manualView) fitMap();
+  if (!gesture) render();
 });
 window.addEventListener("beforeunload", save);
 document.addEventListener("visibilitychange", () => {
@@ -1695,6 +1673,10 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 $("design-banner").after($("creative-tools"));
+if (hasSaved) {
+  updateRecords();
+  save();
+}
 initializeMap();
 render();
 applySettings();
@@ -1855,7 +1837,7 @@ function collectDragStations(drag, p) {
         d: Math.hypot(s.x - a.x - t * dx, s.y - a.y - t * dy),
       };
     })
-    .filter((hit) => hit.d < 22)
+    .filter((hit) => hit.d < 18 * symbolScale())
     .sort((x, y) => x.t - y.t);
   for (const hit of hits) {
     if (hit.id === drag.path.at(-1)) continue;
@@ -1876,6 +1858,7 @@ function showCities() {
       ? game.mapId
       : "london";
   cityMode = "normal";
+  challengeRun = false;
   renderCities();
   $("city-dialog").showModal();
 }
@@ -1961,12 +1944,30 @@ function renderCities() {
     creative:
       "자산은 무제한이며, 역을 직접 편집합니다. 역은 자동으로 생성되지 않습니다.",
   };
-  $("city-mode-description").textContent = descriptions[cityMode];
+  const extremeLocked =
+    cityMode === "extreme" && !profile.extreme.includes(map.id);
+  $("city-mode-description").textContent = extremeLocked
+    ? `익스트림은 잠겨 있습니다. 일반 모드에서 ${CHALLENGES[map.challenge]}${map.challengeScore ? ` 조건으로 ${map.challengeScore}명 수송` : ""}을 달성하면 열립니다.`
+    : descriptions[cityMode];
+  $("challenge-start").hidden = !unlocked || !extremeLocked;
+  const terrain = $("city-map-preview");
+  terrain.replaceChildren();
+  svg(
+    "rect",
+    { x: -60, y: -35, width: 1220, height: 640, fill: "var(--map)" },
+    terrain,
+  );
+  const land = svg("g", {}, terrain);
+  renderTerrain(land, map, true);
+
   document.querySelectorAll("[data-city-mode]").forEach((button) => {
     const mode = button.dataset.cityMode;
     button.classList.toggle("selected", mode === cityMode);
-    button.disabled =
-      !unlocked || (mode === "extreme" && !profile.extreme.includes(map.id));
+    button.disabled = !unlocked;
+    button.setAttribute(
+      "aria-label",
+      `${MODE_NAMES[mode]}${mode === "extreme" && !profile.extreme.includes(map.id) ? " 잠김" : ""}`,
+    );
     button.title =
       mode === "extreme" && !profile.extreme.includes(map.id)
         ? "이 도시의 익스트림 챌린지를 먼저 달성하세요."
@@ -1974,7 +1975,15 @@ function renderCities() {
   });
   $("city-start").disabled = !canStartCity(profile, menuMap, cityMode);
 }
-$("city-start").onclick = startGame;
+$("city-start").onclick = () => {
+  challengeRun = false;
+  startGame();
+};
+$("challenge-start").onclick = () => {
+  cityMode = "normal";
+  challengeRun = true;
+  startGame();
+};
 $("city-close").onclick = () => $("city-dialog").close();
 document.querySelectorAll("[data-city-mode]").forEach(
   (button) =>
@@ -2004,7 +2013,7 @@ const GUIDE = [
   ],
   [
     "역에서 역으로 끌어 연결하세요.",
-    "마우스나 손가락을 누른 채 역 사이를 드래그합니다. 끝의 T 손잡이로 노선을 연장·단축하고, 선로를 새 역으로 끌면 중간에 삽입합니다. 양 끝을 연결하면 순환선이 됩니다. 중간역의 작은 색상 손잡이를 다른 역에 놓으면 교체·순서를 바꾸고, 빈 곳으로 빼면 그 역만 노선에서 제외합니다.",
+    "마우스나 손가락을 누른 채 역 사이를 드래그합니다. 끝의 T 손잡이로 노선을 연장·단축하고, 선로를 새 역으로 끌면 중간에 삽입합니다. 양 끝을 연결하면 순환선이 됩니다. 중간역 바로 옆의 선로를 잡아 다른 역으로 옮기면 연결을 변경하고, 빈 곳으로 빼면 그 역을 건너뜁니다. 별도 편집 손잡이는 없습니다.",
   ],
   [
     "열차와 자산을 배치하세요.",

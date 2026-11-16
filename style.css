@@ -2141,3 +2141,137 @@ footer {
 .middle-handle:active {
   cursor: grabbing;
 }
+.city-dialog {
+  max-width: 900px;
+  max-height: 86svh;
+  padding: 24px;
+}
+.city-dialog h2 {
+  font-size: 23px;
+  margin: 0 0 16px;
+}
+.city-dialog .map-cards {
+  max-height: 30svh;
+  gap: 7px;
+  margin-bottom: 16px;
+}
+.city-dialog .map-thumbnail {
+  height: 47px;
+}
+.city-dialog .map-card {
+  padding-bottom: 8px;
+}
+.city-dialog .map-card strong {
+  font-size: 10px;
+  margin: 7px 8px 4px;
+}
+.city-dialog .map-card small {
+  font-size: 7px;
+  margin: 0 8px;
+}
+.city-summary {
+  grid-template-columns: 190px minmax(0, 1fr) 230px;
+  gap: 18px;
+  padding-top: 15px;
+}
+.city-summary h3 {
+  font-size: 16px;
+}
+.city-summary p {
+  font-size: 10px;
+  margin: 5px 0;
+}
+.city-summary .mode-options {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.city-summary .mode-options button {
+  font-size: 10px;
+  padding: 7px 9px;
+}
+.city-summary .primary {
+  padding: 11px 20px;
+  margin-top: 8px;
+}
+.city-summary #challenge-start {
+  margin-top: 8px;
+  width: 100%;
+}
+#city-map-preview {
+  width: 100%;
+  height: 110px;
+  background: var(--map);
+  border-radius: 5px;
+  align-self: center;
+}
+#city-mode-description {
+  min-height: 36px;
+}
+.middle-handle {
+  display: none;
+}
+@media (max-width: 800px) {
+  .city-summary {
+    grid-template-columns: 150px 1fr;
+  }
+  .city-summary > div:last-child {
+    grid-column: 1/-1;
+  }
+  .city-dialog .map-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    max-height: 27svh;
+  }
+  #city-map-preview {
+    height: 95px;
+  }
+  .city-summary > div:last-child .primary {
+    width: 100%;
+  }
+}
+@media (max-width: 600px) {
+  .city-dialog {
+    padding: 24px 17px;
+    max-height: 89svh;
+  }
+  .city-dialog .map-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    max-height: 25svh;
+    gap: 6px;
+    margin-bottom: 13px;
+  }
+  .city-dialog .map-thumbnail {
+    height: 40px;
+  }
+  .city-summary {
+    grid-template-columns: 110px 1fr;
+    gap: 10px;
+    padding-top: 12px;
+  }
+  .city-summary h3 {
+    font-size: 14px;
+  }
+  .city-summary p {
+    font-size: 8px;
+    line-height: 1.7;
+  }
+  .city-summary .mode-options {
+    gap: 5px;
+  }
+  .city-summary .mode-options button {
+    font-size: 10px;
+    padding: 7px 9px;
+  }
+  #city-map-preview {
+    height: 85px;
+  }
+  #city-mode-description {
+    min-height: 0;
+    margin: 8px 0;
+  }
+  .city-summary .primary {
+    padding: 11px;
+  }
+  .city-summary #challenge-start {
+    font-size: 10px;
+  }
+}
