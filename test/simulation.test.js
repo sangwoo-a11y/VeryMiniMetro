@@ -433,3 +433,61 @@ test("changing a creative station shape fulfils matching waiting passengers with
   assert.equal(g.score, 1);
   assert.equal(count(g), 2);
 });
+
+test("a design starts empty, stays frozen, and can be saved before the first station", async () => {
+  const { createDesign } = await import("../simulation.js");
+  const g = createDesign("normal", rng(), "london");
+  assert.equal(g.stations.length, 0);
+  assert.equal(g.planning, true);
+  tick(g, 50);
+  assert.equal(g.elapsed, 0);
+  assert.equal(g.totalSpawned, 0);
+  assert.equal(validSavedGame(JSON.parse(JSON.stringify(g))), true);
+});
+test("design requires all three station shapes and a fully connected network before launch", async () => {
+  const { createDesign, launchDesign } = await import("../simulation.js");
+  const g = createDesign("normal", rng(), "london");
+  assert.equal(launchDesign(g).ok, false);
+  for (const [shape, x] of [
+    ["circle", 150],
+    ["triangle", 300],
+    ["square", 450],
+  ])
+    assert.equal(placeStation(g, shape, x, 120).ok, true);
+  assert.equal(launchDesign(g).ok, false);
+  line(g, 0, [0, 1, 2]);
+  assert.equal(launchDesign(g).ok, true);
+  assert.equal(g.planning, false);
+  tick(g, 6);
+  assert.ok(g.totalSpawned > 0);
+  assert.equal(g.stations.length, 3);
+});
+test("station movement validates land, spacing, tunnels and the planning boundary", async () => {
+  const { createDesign, launchDesign, moveStation } =
+    await import("../simulation.js");
+  const g = createDesign("normal", rng(), "london");
+  for (const [shape, x] of [
+    ["circle", 150],
+    ["triangle", 300],
+    ["square", 450],
+  ])
+    placeStation(g, shape, x, 120);
+  assert.equal(moveStation(g, 0, 200, 180).ok, true);
+  assert.equal(moveStation(g, 0, 305, 120).ok, false);
+  assert.equal(moveStation(g, 0, -10, 100).ok, false);
+  assert.equal(g.stations[0].x, 200);
+  line(g, 0, [0, 1, 2]);
+  launchDesign(g);
+  assert.equal(moveStation(g, 0, 180, 170).ok, false);
+});
+test("planning permits removal back to an empty canvas, including extreme designs", async () => {
+  const { createDesign } = await import("../simulation.js");
+  const g = createDesign("extreme", rng(), "london");
+  placeStation(g, "circle", 150, 120);
+  placeStation(g, "triangle", 300, 120);
+  line(g, 0, [0, 1]);
+  assert.equal(clearLine(g, 0).ok, true);
+  assert.equal(deleteStation(g, 1).ok, true);
+  assert.equal(deleteStation(g, 0).ok, true);
+  assert.equal(validSavedGame(g), true);
+});

@@ -11,7 +11,100 @@
     <title>Very Mini Metro</title>
     <link rel="stylesheet" href="style.css" />
   </head>
-  <body>
+  <body class="at-home">
+    <section id="home-screen" class="home-screen" aria-label="시작 화면">
+      <nav class="home-nav">
+        <span class="home-wordmark"
+          ><span class="brand-icon">m</span> very mini metro</span
+        ><span class="edition">THE CITY IS YOURS · 2026</span>
+      </nav>
+      <div class="home-content">
+        <div class="home-copy">
+          <p class="eyebrow">A SMALL START. A CITY IN MOTION.</p>
+          <h2>당신의 도시,<br />첫 번째 <em>역</em>부터.</h2>
+          <p class="home-description">
+            빈 지도 위에 역을 놓고, 일상을 잇는 노선을 그려보세요.<br />도시의
+            모든 여정은 당신의 설계에서 시작됩니다.
+          </p>
+          <div class="home-actions">
+            <button id="home-new" class="primary">
+              새 도시 설계하기 <span>↗</span></button
+            ><button id="home-continue" class="home-secondary" hidden>
+              이어서 하기 →
+            </button>
+          </div>
+          <div class="home-features">
+            <span>01 역을 배치하고</span><span>02 노선을 연결하고</span
+            ><span>03 도시를 움직이세요</span>
+          </div>
+        </div>
+        <div class="home-art" aria-hidden="true">
+          <svg viewBox="0 0 540 540">
+            <defs>
+              <pattern
+                id="home-dots"
+                width="24"
+                height="24"
+                patternUnits="userSpaceOnUse"
+              >
+                <circle cx="1" cy="1" r="1" fill="#cad5c9" />
+              </pattern>
+            </defs>
+            <rect width="540" height="540" fill="url(#home-dots)" />
+            <path
+              d="M-20 410 L130 410 L245 295 L350 295 L560 85"
+              stroke="#d0e2df"
+              stroke-width="55"
+              fill="none"
+            />
+            <path
+              class="art-route"
+              d="M80 120 H240 L380 260 V430"
+              stroke="#de735d"
+            />
+            <path
+              class="art-route"
+              d="M80 430 L180 330 V240 L300 120 H455"
+              stroke="#628aaf"
+            />
+            <path
+              class="art-route"
+              d="M80 240 H180 L300 360 H455"
+              stroke="#b5a15a"
+            />
+            <g fill="#f6f8f2" stroke="#304c3d" stroke-width="4">
+              <circle cx="80" cy="120" r="12" />
+              <circle cx="240" cy="120" r="12" />
+              <circle cx="455" cy="120" r="12" />
+              <circle cx="80" cy="430" r="12" />
+              <rect x="166" y="226" width="28" height="28" rx="3" />
+              <circle cx="380" cy="260" r="12" />
+              <path d="M380 414 L395 440 H365 Z" />
+              <path d="M455 344 L470 370 H440 Z" />
+              <circle cx="80" cy="240" r="12" />
+            </g>
+            <rect
+              class="art-train"
+              x="125"
+              y="113"
+              width="28"
+              height="14"
+              rx="4"
+              fill="#de735d"
+              stroke="#f6f8f2"
+              stroke-width="2"
+            />
+          </svg>
+          <div class="art-note">
+            <span class="live-dot"></span> BUILT BY YOU. CONNECTED FOR EVERYONE.
+          </div>
+        </div>
+      </div>
+      <div class="home-footer">
+        <span>A little planning. Endless possibilities.</span
+        ><span>34 CITIES · YOUR OWN NETWORK</span>
+      </div>
+    </section>
     <header>
       <button class="brand" id="menu">
         <span class="brand-icon">m</span
@@ -35,7 +128,7 @@
       <section class="topbar">
         <div>
           <div class="eyebrow">YOUR CITY, CONNECTED</div>
-          <h1>작은 노선에서 시작되는<br />도시의 하루<span>.</span></h1>
+          <h1 id="workspace-title">나의 도시 설계</h1>
         </div>
         <div class="stats">
           <div>
@@ -62,6 +155,16 @@
         hidden
         role="status"
       ></div>
+      <section id="design-banner" class="design-banner" hidden>
+        <div>
+          <span class="eyebrow">DESIGN STUDIO</span
+          ><strong>먼저 역을 놓고, 여정을 연결하세요.</strong>
+          <p id="design-progress">원·세모·네모 역을 각각 배치하세요.</p>
+        </div>
+        <button id="launch-design" class="primary">
+          운행 시작 <span>→</span>
+        </button>
+      </section>
       <section class="map-wrap" aria-label="지하철 노선 지도">
         <div class="map-caption">
           <span class="live-dot"></span
@@ -200,7 +303,11 @@
         </div>
       </section>
       <section id="creative-tools" class="creative-tools" hidden>
-        <span>지도 편집</span
+        <button id="plan-connect" data-tool="connect" class="small-button">
+          노선 연결</button
+        ><button id="plan-erase" data-tool="erase" class="small-button">
+          노선에서 역 빼기</button
+        ><span>역 설계</span
         ><button data-tool="place" class="small-button">
           역 배치 / 모양 변경</button
         ><select id="station-shape" aria-label="역 모양">
@@ -214,6 +321,12 @@
           <option value="sector">◡ 부채꼴</option>
           <option value="diamond">💎 다이아몬드</option>
           <option value="oval">⬭ 타원</option></select
+        ><button
+          data-tool="move-station"
+          class="small-button"
+          id="move-station-tool"
+        >
+          역 이동</button
         ><button data-tool="delete" class="small-button">역 삭제</button>
       </section>
       <footer>
@@ -238,6 +351,15 @@
         런던 · 파리 · 뉴욕에서 시작하세요. 수송 목표를 달성하면 다음 도시가
         열립니다.
       </p>
+      <label class="layout-choice"
+        ><input id="custom-layout" type="checkbox" checked /><span
+          ><b>역부터 직접 설계</b
+          ><small
+            >빈 지도에서 시작 · 직접 배치한 역으로 운영 · 모든 도시 사용
+            가능</small
+          ></span
+        ></label
+      >
       <div class="menu-top">
         <div id="mode-options" class="mode-options">
           <button data-mode="normal" class="selected">일반</button
@@ -260,13 +382,18 @@
           >
           <p id="unlock-reason" class="muted"></p>
         </div>
-        <button id="start-game" class="primary">노선 그리기 →</button>
+        <button id="start-game" class="primary">설계 시작 →</button>
       </div>
     </dialog>
     <dialog id="help-dialog">
       <button class="close" id="close-help" aria-label="닫기">×</button>
       <div class="eyebrow">WELCOME, CITY PLANNER</div>
-      <h2>같은 모양의 역으로.</h2>
+      <h2>빈 지도에서, 나의 도시로.</h2>
+      <p>
+        새 게임은 빈 지도에서 시작합니다. 역 배치 도구와 모양을 선택해 땅 위에
+        역을 놓고, 역 이동으로 위치를 조정하세요. 노선을 연결한 뒤 운행 시작을
+        누르면 승객이 생성됩니다.
+      </p>
       <p>
         작은 승객 아이콘은 목적지 역의 모양입니다. 효율적인 노선과 환승으로
         사람들을 연결하세요.

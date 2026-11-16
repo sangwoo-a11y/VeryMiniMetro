@@ -30,6 +30,10 @@ import {
   challengeValid,
   challengeComplete,
   validSavedGame,
+  createDesign,
+  launchDesign,
+  moveStation,
+  canDesign,
 } from "./simulation.js";
 
 const $ = (id) => document.getElementById(id);
@@ -249,6 +253,7 @@ function tone() {
   }
 }
 function save() {
+  if (document.body.classList.contains("at-home") && !hasSaved) return;
   try {
     localStorage.setItem(SAVE, JSON.stringify(game));
     localStorage.setItem(PROFILE, JSON.stringify(profile));
@@ -297,13 +302,15 @@ function chooseLine(id) {
   render();
 }
 function setTool(next) {
-  tool = tool === next && next !== "connect" ? "connect" : next;
+  tool = next;
   moveId = null;
   pendingInsert = null;
   updateTools();
   render();
 }
 const TOOL_HINTS = {
+  "move-station":
+    "역을 드래그해 위치를 조정하세요. 운행 전까지만 이동할 수 있습니다.",
   connect: "역 사이를 드래그 · 선로 구간 클릭 후 새 역을 클릭하면 중간 삽입",
   train: "열차를 배치할 선택 노선의 역을 누르세요.",
   fast: "신칸센을 배치할 선택 노선의 역을 누르세요.",
@@ -363,7 +370,11 @@ function renderTerrain(
   }
 }
 function fitMap() {
-  if (game.mode === "creative" && window.innerWidth > 700)
+  if (
+    !game.stations.length ||
+    (game.planning && !manualView) ||
+    (game.mode === "creative" && window.innerWidth > 700)
+  )
     view = { x: 0, y: 0, w: 1100, h: 570 };
   else {
     const xs = game.stations.map((s) => s.x),
@@ -693,7 +704,7 @@ function render() {
   $("best").textContent =
     game.mode === "creative"
       ? "자산 무제한 · 자유 편집"
-      : `최고 기록 ${profile.best[`${game.mapId}:${game.mode}`] ?? 0}`;
+      : `최고 기록 ${profile.best[`${game.mapId}:${game.mode}${game.customLayout ? ":custom" : ""}`] ?? 0}`;
   const day = Math.floor(game.elapsed / RULES.day) % 7;
   $("day").textContent = [
     "월요일",
@@ -715,7 +726,21 @@ function render() {
     game.mode === "endless"
       ? `효율 ${game.efficiency} / 보상 ${game.upgradeCount}/14`
       : "";
-  $("creative-tools").hidden = game.mode !== "creative";
+  document.body.classList.toggle("planning", Boolean(game.planning));
+  $("workspace-title").textContent = game.planning
+    ? "나의 도시 설계"
+    : "도시의 하루";
+  $("design-banner").hidden = !game.planning;
+  $("move-station-tool").hidden = !game.planning;
+  $("plan-connect").hidden = !game.planning;
+  $("plan-erase").hidden = !game.planning;
+  const counts = BASIC.map(
+    (type) => game.stations.filter((s) => s.shape === type).length,
+  );
+  $("design-progress").textContent =
+    `○ ${counts[0]}  ·  △ ${counts[1]}  ·  □ ${counts[2]}  /  ${game.stations.length}개 역 · ${game.lines.filter((l) => l.stations.length > 1).length}개 노선`;
+  $("launch-design").disabled = !counts.every((n) => n > 0);
+  $("creative-tools").hidden = !canDesign(game);
   $("map-details").textContent =
     `최대 ${map.maxLines}개 노선 · 역 정원 ${map.stationCapacity}명`;
   $("lines").replaceChildren();
@@ -754,10 +779,10 @@ function render() {
   $("crossing-title").append(small);
   $("tool-interchange").hidden = map.noInterchange;
   $("tool-fast").hidden = !["tokyo", "osaka"].includes(map.id);
-  $("clear").disabled = game.mode === "extreme";
+  $("clear").disabled = game.mode === "extreme" && !game.planning;
   $("open-loop").hidden = !game.lines[selected].loop;
-  $("open-loop").disabled = game.mode === "extreme";
-  $("tool-erase").disabled = game.mode === "extreme";
+  $("open-loop").disabled = game.mode === "extreme" && !game.planning;
+  $("tool-erase").disabled = game.mode === "extreme" && !game.planning;
   $("pause").textContent = paused ? "▶" : "Ⅱ";
   $("pause").setAttribute("aria-label", paused ? "계속하기" : "일시 정지");
   $("speed").textContent = `${speed}×`;
@@ -766,13 +791,16 @@ function render() {
   $("challenge-banner").hidden = !violated;
   $("challenge-banner").textContent =
     `도전 조건 위반으로 일시 정지 · ${CHALLENGES[map.challenge]}. 노선을 수정하면 계속됩니다.`;
-  $("network-status").textContent = paused
-    ? "PAUSED"
-    : violated
-      ? "CHALLENGE PAUSED"
-      : "LIVE NETWORK";
-  $("footer-message").textContent =
-    game.mode === "extreme"
+  $("network-status").textContent = game.planning
+    ? "DESIGN MODE"
+    : paused
+      ? "PAUSED"
+      : violated
+        ? "CHALLENGE PAUSED"
+        : "LIVE NETWORK";
+  $("footer-message").textContent = game.planning
+    ? "설계 중 · 역과 노선을 완성한 뒤 운행을 시작하세요."
+    : game.mode === "extreme"
       ? "한 번 그은 노선은 연장만 가능합니다."
       : game.trains.some((t) => t.pendingMove)
         ? "열차 재배치 대기 중 · 다음 역에서 승객을 내립니다."
@@ -921,7 +949,7 @@ window.addEventListener("pointermove", (event) => {
     }
     return;
   }
-  if (tool === "connect") {
+  if (tool === "connect" || tool === "move-station") {
     $("drag-preview").replaceChildren();
     const s = game.stations[gesture.station];
     svg(
@@ -946,6 +974,18 @@ window.addEventListener("pointerup", (event) => {
   gesture = null;
   $("drag-preview").replaceChildren();
   if (old.pan) return;
+  if (tool === "move-station") {
+    const p = mapPoint(event);
+    notify(
+      moveStation(
+        game,
+        old.station,
+        Math.round(p.x / 14) * 14,
+        Math.round(p.y / 14) * 14,
+      ),
+    );
+    return;
+  }
   const target = nearestStation(mapPoint(event)),
     moved =
       Math.hypot(event.clientX - old.clientX, event.clientY - old.clientY) > 5;
@@ -1021,9 +1061,9 @@ function handleTrain(id) {
     "carriage-move",
     "carriage-remove",
   ])
-    $(id).disabled = game.mode === "extreme";
+    $(id).disabled = game.mode === "extreme" && !game.planning;
   $("train-reverse").hidden = !game.lines[t.line].loop;
-  $("train-reverse").disabled = game.mode === "extreme";
+  $("train-reverse").disabled = game.mode === "extreme" && !game.planning;
   $("train-dialog").showModal();
 }
 function trainAction(action) {
@@ -1061,9 +1101,9 @@ $("close-train").onclick = () => $("train-dialog").close();
 
 function updateRecords() {
   if (game.mode === "creative") return;
-  const key = `${game.mapId}:${game.mode}`;
+  const key = `${game.mapId}:${game.mode}${game.customLayout ? ":custom" : ""}`;
   profile.best[key] = Math.max(profile.best[key] ?? 0, game.score);
-  if (game.mode !== "normal") return;
+  if (game.mode !== "normal" || game.customLayout) return;
   const map = getMap(game.mapId);
   if (game.score >= map.goal)
     for (const id of map.next)
@@ -1145,21 +1185,33 @@ function syncStateDialogs() {
   }
 }
 function startGame() {
-  if (menuMode !== "creative" && !profile.unlocked.includes(menuMap)) {
+  if (
+    !$("custom-layout").checked &&
+    menuMode !== "creative" &&
+    !profile.unlocked.includes(menuMap)
+  ) {
     toast("아직 잠긴 도시입니다. 크리에이티브에서 미리 체험할 수 있습니다.");
     return;
   }
-  if (menuMode === "extreme" && !profile.extreme.includes(menuMap)) {
+  if (
+    !$("custom-layout").checked &&
+    menuMode === "extreme" &&
+    !profile.extreme.includes(menuMap)
+  ) {
     toast("먼저 이 도시의 익스트림 챌린지를 달성하세요.");
     return;
   }
   document.querySelectorAll("dialog[open]").forEach((d) => d.close());
-  game = createGame(menuMode, Math.random, menuMap);
+  document.body.classList.remove("at-home");
+  $("home-screen").hidden = true;
+  game = $("custom-layout").checked
+    ? createDesign(menuMode, Math.random, menuMap)
+    : createGame(menuMode, Math.random, menuMap);
   game.challengeMode = $("challenge-mode").checked && menuMode === "normal";
   selected = 0;
   paused = false;
   speed = 1;
-  tool = "connect";
+  tool = game.planning ? "place" : "connect";
   pendingInsert = null;
   endpoint = "back";
   gesture = null;
@@ -1169,7 +1221,11 @@ function startGame() {
   save();
   initializeMap();
   render();
-  toast(`${getMap(menuMap).name} · 두 역을 연결하면 첫 열차가 출발합니다.`);
+  toast(
+    game.planning
+      ? "모양을 선택하고 빈 땅을 눌러 첫 역을 놓으세요."
+      : `${getMap(menuMap).name} · 두 역을 연결하면 첫 열차가 출발합니다.`,
+  );
 }
 function initializeMap() {
   const map = getMap(game.mapId);
@@ -1184,7 +1240,7 @@ function initializeMap() {
   applySettings();
 }
 function openMenu() {
-  save();
+  if (!document.body.classList.contains("at-home")) save();
   menuMap = game.mapId;
   menuMode = game.mode;
   renderMenu();
@@ -1199,7 +1255,8 @@ function renderMenu() {
       b.classList.toggle("selected", b.dataset.mode === menuMode),
     );
   for (const map of MAPS) {
-    const locked = !profile.unlocked.includes(map.id),
+    const locked =
+        !$("custom-layout").checked && !profile.unlocked.includes(map.id),
       card = document.createElement("button");
     card.className = `map-card${map.id === menuMap ? " selected" : ""}${locked && menuMode !== "creative" ? " map-locked" : ""}`;
     card.dataset.map = map.id;
@@ -1262,8 +1319,14 @@ function renderMenu() {
     $("map-cards").append(card);
   }
   const map = getMap(menuMap),
-    locked = menuMode !== "creative" && !profile.unlocked.includes(map.id),
-    extremeLocked = menuMode === "extreme" && !profile.extreme.includes(map.id);
+    locked =
+      !$("custom-layout").checked &&
+      menuMode !== "creative" &&
+      !profile.unlocked.includes(map.id),
+    extremeLocked =
+      !$("custom-layout").checked &&
+      menuMode === "extreme" &&
+      !profile.extreme.includes(map.id);
   $("selected-map-title").textContent = `${map.name} / ${map.en}`;
   $("selected-map-details").textContent =
     `시작 노선 ${map.startLines}개 · 열차 ${map.startLines}대 · ${map.crossing === "bridge" ? "다리" : "터널"} ${map.tunnels}개${map.startCarriages ? ` · 객차 ${map.startCarriages}개` : ""} / 노선당 최대 열차 ${map.maxTrains}대 · 한 칸 ${map.seats}인승`;
@@ -1278,13 +1341,54 @@ function renderMenu() {
       ? "일반 모드에서 위 챌린지를 달성하면 익스트림이 열립니다."
       : `◇ ${map.goal}명 수송${map.next.length ? ` → ${map.next.map((id) => getMap(id).name).join(", ")} 해금` : ""}`;
   $("start-game").disabled = locked || extremeLocked;
+  $("start-game").textContent = $("custom-layout").checked
+    ? "설계 시작 →"
+    : "운행 시작 →";
+  if ($("custom-layout").checked)
+    $("unlock-reason").textContent =
+      "자유 설계 · 자동 역 생성 없음 · 원작 지도 해금과 별도 기록";
   $("challenge-label").hidden = menuMode !== "normal";
   $("continue-game").hidden = !hasSaved;
 }
 $("start-game").onclick = startGame;
-$("menu").onclick = $("map-menu").onclick = openMenu;
+$("station-shape").onchange = () => {
+  tool = "place";
+  pendingInsert = null;
+  updateTools();
+};
+$("custom-layout").onchange = renderMenu;
+$("map-menu").onclick = openMenu;
+$("menu").onclick = showHome;
+$("home-new").onclick = () => {
+  $("custom-layout").checked = true;
+  renderMenu();
+  $("menu-dialog").showModal();
+};
+$("home-continue").onclick = () => {
+  $("home-screen").hidden = true;
+  document.body.classList.remove("at-home");
+  initializeMap();
+  render();
+  syncStateDialogs();
+};
+$("launch-design").onclick = () => {
+  if (notify(launchDesign(game))) {
+    tool = "connect";
+    paused = false;
+    render();
+  }
+};
+function showHome() {
+  save();
+  document.querySelectorAll("dialog[open]").forEach((d) => d.close());
+  $("home-screen").hidden = false;
+  document.body.classList.add("at-home");
+  $("home-continue").hidden = !hasSaved;
+}
+
 $("close-menu").onclick = $("continue-game").onclick = () => {
   $("menu-dialog").close();
+  if (document.body.classList.contains("at-home")) return;
   syncStateDialogs();
 };
 $("menu-dialog").addEventListener("cancel", () => {
@@ -1299,6 +1403,7 @@ document.querySelectorAll("[data-mode]").forEach(
     }),
 );
 $("retry-game").onclick = () => {
+  $("custom-layout").checked = Boolean(game.customLayout);
   menuMap = game.mapId;
   menuMode = game.mode;
   startGame();
@@ -1396,6 +1501,7 @@ $("zoom-fit").onclick = () => {
 };
 window.addEventListener("keydown", (e) => {
   if (
+    document.body.classList.contains("at-home") ||
     document.querySelector("dialog[open]") ||
     ["INPUT", "SELECT", "BUTTON"].includes(document.activeElement?.tagName)
   )
@@ -1427,7 +1533,12 @@ document.addEventListener("visibilitychange", () => {
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
-  if (!paused && !document.hidden && !document.querySelector("dialog[open]")) {
+  if (
+    !document.body.classList.contains("at-home") &&
+    !paused &&
+    !document.hidden &&
+    !document.querySelector("dialog[open]")
+  ) {
     const score = game.score;
     tick(game, dt * speed);
     if (game.score > score) {
@@ -1464,9 +1575,12 @@ function frame(now) {
   }
   requestAnimationFrame(frame);
 }
+$("design-banner").after($("creative-tools"));
 initializeMap();
 render();
 applySettings();
 renderMenu();
-$("menu-dialog").showModal();
+$("home-continue").hidden = !hasSaved;
+if (game.planning) tool = "place";
+updateTools();
 requestAnimationFrame(frame);

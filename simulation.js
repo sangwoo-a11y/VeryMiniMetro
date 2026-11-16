@@ -385,7 +385,7 @@ export function connect(game, lineId, stationId, end = "back") {
   return commitLine(game, lineId, { stations: ids, loop: false });
 }
 export function insertStation(game, lineId, edgeIndex, stationId) {
-  if (game.mode === "extreme")
+  if (game.mode === "extreme" && !game.planning)
     return result(false, "익스트림에서는 끝역 연장만 가능합니다.");
   const line = game.lines[lineId];
   if (!line || !lineEdges(line)[edgeIndex])
@@ -397,7 +397,7 @@ export function insertStation(game, lineId, edgeIndex, stationId) {
   return commitLine(game, lineId, { stations: ids, loop: line.loop });
 }
 export function removeStation(game, lineId, stationId) {
-  if (game.mode === "extreme")
+  if (game.mode === "extreme" && !game.planning)
     return result(
       false,
       "익스트림에서는 노선을 단축하거나 수정할 수 없습니다.",
@@ -412,12 +412,12 @@ export function removeStation(game, lineId, stationId) {
   });
 }
 export function clearLine(game, id) {
-  if (game.mode === "extreme")
+  if (game.mode === "extreme" && !game.planning)
     return result(false, "익스트림에서는 노선을 폐쇄할 수 없습니다.");
   return commitLine(game, id, { stations: [], loop: false });
 }
 export function openLoop(game, id) {
-  if (game.mode === "extreme")
+  if (game.mode === "extreme" && !game.planning)
     return result(false, "익스트림에서는 순환선을 해제할 수 없습니다.");
   return commitLine(game, id, {
     stations: [...game.lines[id].stations],
@@ -576,7 +576,7 @@ function releaseTrain(game, train) {
   game.trains.splice(game.trains.indexOf(train), 1);
 }
 export function moveTrain(game, trainId, lineId = null, stationId = null) {
-  if (game.mode === "extreme")
+  if (game.mode === "extreme" && !game.planning)
     return result(
       false,
       "익스트림에서는 열차를 재배치하거나 회수할 수 없습니다.",
@@ -629,7 +629,7 @@ function applyPendingMove(game, train) {
   train.dwell = 0.5;
 }
 export function moveCarriage(game, fromId, toId = null) {
-  if (game.mode === "extreme")
+  if (game.mode === "extreme" && !game.planning)
     return result(
       false,
       "익스트림에서는 객차를 재배치하거나 회수할 수 없습니다.",
@@ -930,6 +930,7 @@ function step(game, dt, random) {
   }
   if (
     !creative(game) &&
+    !game.customLayout &&
     game.elapsed >= game.nextStation &&
     game.stations.length < 40
   ) {
@@ -980,6 +981,7 @@ function step(game, dt, random) {
   }
 }
 export function tick(game, dt, random = Math.random) {
+  if (game.planning) return;
   if (
     game.gameOver ||
     game.pendingUpgrade ||
@@ -1017,7 +1019,7 @@ function changeShape(game, station, shape) {
   });
 }
 export function editStation(game, id, shape) {
-  if (!creative(game))
+  if (!canDesign(game))
     return result(false, "역 편집은 크리에이티브에서만 가능합니다.");
   if (![...BASIC, ...SPECIAL].includes(shape))
     return result(false, "지원하지 않는 모양입니다.");
@@ -1032,7 +1034,7 @@ export function editStation(game, id, shape) {
   return result(true);
 }
 export function placeStation(game, shape, x, y) {
-  if (!creative(game))
+  if (!canDesign(game))
     return result(false, "역 배치는 크리에이티브에서만 가능합니다.");
   if (![...BASIC, ...SPECIAL].includes(shape))
     return result(false, "지원하지 않는 모양입니다.");
@@ -1046,9 +1048,9 @@ export function placeStation(game, shape, x, y) {
   return result(true);
 }
 export function deleteStation(game, id) {
-  if (!creative(game))
+  if (!canDesign(game))
     return result(false, "역 삭제는 크리에이티브에서만 가능합니다.");
-  if (game.stations.length <= 3)
+  if (!game.planning && game.stations.length <= 3)
     return result(false, "최소 3개 역은 남겨주세요.");
   // Only delete unserved stations: avoids invalidating physical trains in transit.
   if (
@@ -1151,7 +1153,7 @@ export function validSavedGame(game) {
     return false;
   if (
     !Array.isArray(game.stations) ||
-    game.stations.length < 3 ||
+    (game.stations.length < 3 && !(game.customLayout && game.planning)) ||
     game.stations.length > 200 ||
     !Array.isArray(game.lines) ||
     game.lines.length !== 7 ||
@@ -1243,4 +1245,67 @@ export function validSavedGame(game) {
   )
     return false;
   return Array.isArray(game.events);
+}
+
+export const canDesign = (game) =>
+  creative(game) ||
+  game.planning ||
+  (game.customLayout && game.mode !== "extreme");
+export function createDesign(
+  mode = "normal",
+  random = Math.random,
+  mapId = "seoul",
+) {
+  const game = createGame(mode, random, mapId);
+  game.stations = [];
+  game.customLayout = true;
+  game.planning = true;
+  return game;
+}
+export function launchDesign(game) {
+  if (!game.planning) return result(false, "이미 운행 중입니다.");
+  if (!BASIC.every((shape) => game.stations.some((s) => s.shape === shape)))
+    return result(false, "원·세모·네모 역을 각각 1개 이상 배치하세요.");
+  const seen = new Set([0]),
+    queue = [0];
+  while (queue.length)
+    for (const edge of neighbors(game, queue.shift())) {
+      if (!seen.has(edge.to)) {
+        seen.add(edge.to);
+        queue.push(edge.to);
+      }
+    }
+  if (seen.size !== game.stations.length)
+    return result(
+      false,
+      "모든 역을 노선으로 연결하세요. 환승으로 이어도 됩니다.",
+    );
+  if (!game.trains.length)
+    return result(false, "노선에 열차를 한 대 이상 배치하세요.");
+  game.planning = false;
+  game.stations.forEach((s, i) => {
+    s.nextSpawn = 5 + i * 1.1;
+  });
+  return result(true, "설계가 완성되었습니다. 첫 운행을 시작합니다.");
+}
+export function moveStation(game, id, x, y) {
+  if (!game.planning)
+    return result(false, "역 위치 이동은 운행 시작 전에 가능합니다.");
+  const station = game.stations[id];
+  if (!station) return result(false, "이동할 역을 선택하세요.");
+  if (x < 60 || x > 1040 || y < 70 || y > 500 || waterAt(x, y, 5, game))
+    return result(false, "물 밖의 지도 안쪽으로 옮기세요.");
+  if (
+    game.stations.some((s) => s.id !== id && Math.hypot(s.x - x, s.y - y) < 55)
+  )
+    return result(false, "다른 역과 간격을 충분히 띄워주세요.");
+  const old = { x: station.x, y: station.y };
+  station.x = x;
+  station.y = y;
+  if (!creative(game) && tunnelsUsed(game) > game.stock.tunnels) {
+    Object.assign(station, old);
+    return result(false, "이 위치로 이동하면 터널이 부족합니다.");
+  }
+  game.routeVersion = (game.routeVersion ?? 0) + 1;
+  return result(true);
 }
