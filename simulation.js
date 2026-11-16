@@ -1,4 +1,4 @@
-import { getMap } from "./maps.js";
+import { getMap } from "./maps.js?v=5";
 // Seoul rules. Timing and demand rates not specified by the reference are tuned here.
 export const COLORS = [
   "#de6657",
@@ -1362,4 +1362,44 @@ export function trimLine(game, lineId, stationId, end = "back") {
         : line.stations.slice(0, index + 1),
     loop: false,
   });
+}
+
+// Commit a whole drag at once; an invalid drop never consumes a train or leaves half a line.
+export function drawRoute(game, lineId, path) {
+  const line = game.lines[lineId];
+  if (!line || path.length < 2 || path.some((id) => !game.stations[id]))
+    return result(false, "역에서 다른 역까지 드래그하세요.");
+  if (line.loop) return result(false, "순환선을 먼저 열어주세요.");
+  const ids = [...line.stations];
+  const end =
+    !ids.length || ids.at(-1) === path[0]
+      ? "back"
+      : ids[0] === path[0]
+        ? "front"
+        : null;
+  if (!end) return result(false, "노선 끝부분에서 드래그해 연장하세요.");
+  if (!ids.length) ids.push(path[0]);
+  let loop = false;
+  for (let i = 1; i < path.length; i++) {
+    const id = path[i],
+      index = ids.indexOf(id);
+    if (index >= 0) {
+      const opposite = end === "back" ? ids[0] : ids.at(-1);
+      if (id === opposite && ids.length >= 3 && i === path.length - 1) {
+        loop = true;
+        continue;
+      }
+      if (path.length === 2) {
+        if (game.mode === "extreme" && !game.planning)
+          return result(false, "익스트림에서는 노선을 단축할 수 없습니다.");
+        return commitLine(game, lineId, {
+          stations: end === "back" ? ids.slice(0, index + 1) : ids.slice(index),
+          loop: false,
+        });
+      }
+      return result(false, "한 노선에서 중간역을 중복 연결할 수 없습니다.");
+    }
+    end === "back" ? ids.push(id) : ids.unshift(id);
+  }
+  return commitLine(game, lineId, { stations: ids, loop });
 }

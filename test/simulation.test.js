@@ -593,33 +593,33 @@ test("expanded networks with more than two hundred stations can be restored", ()
   assert.equal(validSavedGame(JSON.parse(JSON.stringify(g))), true);
 });
 
-test("startup automatically keeps the current city before its goal", async () => {
-  const { nextPlayableCity } = await import("../maps.js");
-  assert.equal(
-    nextPlayableCity("london", 0, ["london", "paris", "newyork"]),
-    "london",
-  );
-  assert.equal(
-    nextPlayableCity("paris", 199, ["london", "paris", "newyork"]),
-    "paris",
-  );
+test("one continuous drag can connect several stations with one locomotive", async () => {
+  const { drawRoute } = await import("../simulation.js");
+  const g = quiet();
+  assert.equal(drawRoute(g, 0, [0, 1, 2]).ok, true);
+  assert.deepEqual(g.lines[0].stations, [0, 1, 2]);
+  assert.equal(g.trains.length, 1);
+  assert.equal(g.stock.locomotives, 2);
+  assert.equal(drawRoute(g, 0, [2, 0]).ok, true);
+  assert.equal(g.lines[0].loop, true);
 });
-test("a completed city automatically advances only to an unlocked successor", async () => {
-  const { nextPlayableCity } = await import("../maps.js");
-  assert.equal(
-    nextPlayableCity("london", 200, ["london", "paris", "newyork", "warsaw"]),
-    "warsaw",
-  );
-  assert.equal(
-    nextPlayableCity("london", 200, ["london", "paris", "newyork"]),
-    "london",
-  );
+test("an invalid drag leaves no partial route and consumes no inventory", async () => {
+  const { drawRoute } = await import("../simulation.js");
+  const g = createGame("normal", rng(), "seoul");
+  g.stock.tunnels = 0;
+  const before = JSON.stringify(g.lines),
+    stock = g.stock.locomotives;
+  assert.equal(drawRoute(g, 0, [0, 1, 2]).ok, false);
+  assert.equal(JSON.stringify(g.lines), before);
+  assert.equal(g.stock.locomotives, stock);
+  assert.equal(g.trains.length, 0);
 });
-test("unknown or unavailable saved city preferences fall back to London", async () => {
-  const { nextPlayableCity } = await import("../maps.js");
-  assert.equal(nextPlayableCity("not-a-city", 0, ["london"]), "london");
-  assert.equal(
-    nextPlayableCity("seoul", 0, ["london", "paris", "newyork"]),
-    "london",
-  );
+test("a drag extends either end or retracts an endpoint without duplicating stations", async () => {
+  const { drawRoute } = await import("../simulation.js");
+  const g = quiet();
+  line(g, 0, [1, 2]);
+  assert.equal(drawRoute(g, 0, [1, 0]).ok, true);
+  assert.deepEqual(g.lines[0].stations, [0, 1, 2]);
+  assert.equal(drawRoute(g, 0, [2, 1]).ok, true);
+  assert.deepEqual(g.lines[0].stations, [0, 1]);
 });

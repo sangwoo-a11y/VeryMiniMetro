@@ -11,6 +11,7 @@ const types = {
 http
   .createServer(async (req, res) => {
     try {
+      res.setHeader("Cache-Control", "no-store");
       const path = new URL(req.url, "http://localhost").pathname;
       if (path.includes("..")) throw Error();
       const file = path === "/" ? "index.html" : path.slice(1);

@@ -1,21 +1,14 @@
-import {
-  MAPS,
-  getMap,
-  INITIAL_UNLOCKS,
-  CHALLENGES,
-  nextPlayableCity,
-} from "./maps.js";
+import { MAPS, getMap, INITIAL_UNLOCKS, CHALLENGES } from "./maps.js?v=5";
 import {
   BASIC,
   SPECIAL,
   RULES,
   createGame,
   tick,
-  connect,
+  drawRoute,
   insertStation,
   removeStation,
   clearLine,
-  trimLine,
   openLoop,
   addTrain,
   addCarriage,
@@ -40,7 +33,7 @@ import {
   launchDesign,
   moveStation,
   canDesign,
-} from "./simulation.js";
+} from "./simulation.js?v=5";
 
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
@@ -93,6 +86,11 @@ try {
       ...stored,
       settings: { ...profile.settings, ...stored.settings },
     };
+    profile.best =
+      typeof stored.best === "object" && !Array.isArray(stored.best)
+        ? stored.best
+        : {};
+    profile.vintage = Array.isArray(stored.vintage) ? stored.vintage : [];
     profile.unlocked = [
       ...new Set([
         ...INITIAL_UNLOCKS,
@@ -493,7 +491,6 @@ function renderRoutes() {
           },
           handle,
         );
-        if (selected !== lineId) handle.setAttribute("pointer-events", "none");
       }
     }
   });
@@ -879,25 +876,9 @@ function selectStation(id) {
     return;
   }
   if (tool !== "connect") return;
-  if (pendingInsert !== null) {
-    const ok = notify(insertStation(game, selected, pendingInsert, id));
-    if (ok) pendingInsert = null;
-    updateTools();
-    return;
-  }
   const line = game.lines[selected];
-  if (line.stations.includes(id)) {
-    const opposite =
-      endpoint === "back" ? line.stations[0] : line.stations.at(-1);
-    if (id === opposite && line.stations.length >= 3) {
-      notify(connect(game, selected, id, endpoint));
-      return;
-    }
-    endpoint = id === line.stations[0] ? "front" : "back";
-    toast("연장할 다음 역을 누르거나, 이 끝역에서 드래그하세요.");
-    return;
-  }
-  notify(connect(game, selected, id, endpoint));
+  if (line.stations[0] === id) endpoint = "front";
+  else if (line.stations.at(-1) === id) endpoint = "back";
 }
 function mapPoint(event) {
   const p = $("map").createSVGPoint();
@@ -928,10 +909,29 @@ $("map").addEventListener("pointerdown", (event) => {
   const p = mapPoint(event);
   if (station) {
     event.preventDefault();
-    if (station.dataset.handleLine !== undefined)
+    if (station.dataset.handleLine !== undefined) {
       selected = Number(station.dataset.handleLine);
+      tool = "connect";
+      pendingInsert = null;
+    }
+    const origin = Number(station.dataset.station);
+    if (tool === "connect" && !station.dataset.end) {
+      const line = game.lines[selected];
+      if (
+        line.stations.length &&
+        (line.loop ||
+          ![line.stations[0], line.stations.at(-1)].includes(origin))
+      ) {
+        const available = game.lines.findIndex(
+          (l, i) => i < game.unlocked && !l.stations.length,
+        );
+        if (available >= 0) selected = available;
+      }
+    }
     gesture = {
-      station: Number(station.dataset.station),
+      path: [origin],
+      lastPoint: p,
+      station: origin,
       point: p,
       clientX: event.clientX,
       clientY: event.clientY,
@@ -943,9 +943,10 @@ $("map").addEventListener("pointerdown", (event) => {
     const line = Number(edge.dataset.line);
     if (line < game.unlocked) {
       selected = line;
-      pendingInsert = Number(edge.dataset.edge);
+      const edgeIndex = Number(edge.dataset.edge);
+      pendingInsert = null;
       gesture = {
-        edge: pendingInsert,
+        edge: edgeIndex,
         line,
         point: p,
         clientX: event.clientX,
@@ -1012,22 +1013,52 @@ window.addEventListener("pointermove", (event) => {
     }
     return;
   }
-  if (tool === "connect" || tool === "move-station") {
+  if (tool === "connect" && gesture.station !== undefined) {
+    collectDragStations(gesture, p);
     $("drag-preview").replaceChildren();
-    const s = game.stations[gesture.station];
+    const stops = gesture.path.map((id) => game.stations[id]);
+    const target = nearestStation(p);
+    const finish = target !== null ? game.stations[target] : { ...p, id: 9999 };
+    const points = [];
+    for (let i = 1; i < stops.length; i++)
+      points.push(...edgePoints(stops[i - 1], stops[i]));
+    points.push(...edgePoints(stops.at(-1), finish));
     svg(
       "polyline",
       {
-        points: edgePoints(s, { ...p, id: 9999 })
-          .map((p) => `${p.x},${p.y}`)
-          .join(" "),
+        points: points.map((q) => `${q.x},${q.y}`).join(" "),
         fill: "none",
         stroke: colors()[selected],
-        "stroke-width": 4,
-        "stroke-dasharray": "5 5",
-        opacity: 0.6,
+        "stroke-width": 6,
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        opacity: 0.65,
       },
       $("drag-preview"),
+    );
+    for (const stop of stops)
+      svg(
+        "circle",
+        {
+          cx: stop.x,
+          cy: stop.y,
+          r: 18,
+          fill: "none",
+          stroke: colors()[selected],
+          "stroke-width": 2,
+          opacity: 0.5,
+        },
+        $("drag-preview"),
+      );
+  } else if (tool === "move-station") {
+    $("drag-preview").replaceChildren();
+    shape(
+      game.stations[gesture.station].shape,
+      p.x,
+      p.y,
+      10,
+      $("drag-preview"),
+      { fill: "var(--station)", stroke: "var(--ink)", "stroke-width": 2 },
     );
   }
 });
@@ -1107,37 +1138,14 @@ window.addEventListener("pointerup", (event) => {
   const target = nearestStation(mapPoint(event)),
     moved =
       Math.hypot(event.clientX - old.clientX, event.clientY - old.clientY) > 5;
-  if (
-    tool === "connect" &&
-    moved &&
-    target !== null &&
-    target !== old.station
-  ) {
-    const line = game.lines[selected];
-    if (!line.stations.length) {
-      const first = connect(game, selected, old.station);
-      if (!first.ok) {
-        notify(first);
-        return;
-      }
-    }
-    const current = game.lines[selected];
-    if (
-      old.station !== current.stations[0] &&
-      old.station !== current.stations.at(-1)
-    ) {
-      toast("노선 끝역에서 드래그하세요. 중간 삽입은 선로 구간을 눌러주세요.");
+  if (tool === "connect" && moved) {
+    if (target === null || (target === old.station && old.path.length < 3)) {
+      render();
       return;
     }
-    endpoint = old.station === current.stations[0] ? "front" : "back";
-    const opposite =
-      endpoint === "front" ? current.stations.at(-1) : current.stations[0];
-    if (
-      current.stations.includes(target) &&
-      (target !== opposite || current.stations.length < 3)
-    )
-      notify(trimLine(game, selected, target, endpoint));
-    else notify(connect(game, selected, target, endpoint));
+    collectDragStations(old, released);
+    if (old.path.at(-1) !== target) old.path.push(target);
+    notify(drawRoute(game, selected, old.path));
   } else if (!moved) {
     if (old.end) endpoint = old.end;
     selectStation(old.station);
@@ -1355,12 +1363,7 @@ $("station-shape").onchange = () => {
 };
 $("menu").onclick = showHome;
 $("home-new").onclick = () => {
-  const previous = profile.lastCity ?? (hasSaved ? game.mapId : "london");
-  menuMap = nextPlayableCity(
-    previous,
-    profile.best[`${previous}:normal`] ?? 0,
-    profile.unlocked,
-  );
+  menuMap = getMap($("city-select").value).id;
   startGame();
 };
 $("home-continue").onclick = () => {
@@ -1386,11 +1389,7 @@ function showHome() {
 }
 
 $("retry-game").onclick = () => {
-  menuMap = nextPlayableCity(
-    game.mapId,
-    game.mode === "normal" ? game.score : 0,
-    profile.unlocked,
-  );
+  menuMap = game.mapId;
   startGame();
 };
 $("over-menu").onclick = showHome;
@@ -1531,6 +1530,16 @@ applySettings();
 $("home-continue").hidden = !hasSaved;
 if (game.planning) tool = "place";
 updateTools();
+const citySelect = $("city-select");
+for (const map of MAPS) {
+  const option = document.createElement("option");
+  option.value = map.id;
+  option.textContent = map.name;
+  citySelect.append(option);
+}
+citySelect.value = getMap(profile.lastCity ?? menuMap).id;
+$("home-new").disabled = false;
+$("load-error").hidden = true;
 requestAnimationFrame(frame);
 
 function closestTrain(p) {
@@ -1662,4 +1671,37 @@ function renderWaterMask() {
       },
       mask,
     );
+}
+
+function collectDragStations(drag, p) {
+  const a = drag.lastPoint ?? drag.point,
+    dx = p.x - a.x,
+    dy = p.y - a.y,
+    length = dx * dx + dy * dy;
+  const hits = game.stations
+    .map((s) => {
+      const t = length
+        ? Math.max(
+            0,
+            Math.min(1, ((s.x - a.x) * dx + (s.y - a.y) * dy) / length),
+          )
+        : 1;
+      return {
+        id: s.id,
+        t,
+        d: Math.hypot(s.x - a.x - t * dx, s.y - a.y - t * dy),
+      };
+    })
+    .filter((hit) => hit.d < 22)
+    .sort((x, y) => x.t - y.t);
+  for (const hit of hits) {
+    if (hit.id === drag.path.at(-1)) continue;
+    if (hit.id === drag.path.at(-2)) {
+      drag.path.pop();
+      continue;
+    }
+    if (drag.path.includes(hit.id) && hit.id !== drag.path[0]) continue;
+    drag.path.push(hit.id);
+  }
+  drag.lastPoint = p;
 }
