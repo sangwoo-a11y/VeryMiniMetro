@@ -1,5 +1,5 @@
-import { readableLineColor } from "./theme.js?v=9";
-import { smoothAngle, cameraAt } from "./motion.js?v=9";
+import { readableLineColor } from "./theme.js?v=10";
+import { smoothAngle, cameraAt, samplePath, easePath } from "./motion.js?v=10";
 import {
   MAPS,
   getMap,
@@ -9,7 +9,7 @@ import {
   cityUnlocked,
   canStartCity,
   cityRequirement,
-} from "./maps.js?v=9";
+} from "./maps.js?v=10";
 import {
   BASIC,
   SPECIAL,
@@ -47,7 +47,7 @@ import {
   launchDesign,
   moveStation,
   canDesign,
-} from "./simulation.js?v=9";
+} from "./simulation.js?v=10";
 
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
@@ -93,7 +93,8 @@ let routeSignature = "",
   previewSignature = "",
   endpointSignature = "",
   cameraTween = null,
-  pendingPointerMove = null;
+  pendingPointerMove = null,
+  previewMotion = null;
 const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
 const reducedMotion = () => motionPreference.matches;
 let viewGestureDirty = false,
@@ -605,27 +606,43 @@ function renderStations() {
       s.x,
       s.y,
       s.interchange,
-      s.waiting,
     ]);
-    const existing = stationNodes.get(s.id);
-    if (existing?.key === key && existing.node.isConnected) continue;
-    const g = svg("g", {
-      class: existing ? "station" : "station station-arrival",
-      transform: `translate(${s.x} ${s.y}) scale(${symbolScale()}) translate(${-s.x} ${-s.y})`,
-      "data-station": s.id,
-      role: "button",
-      tabindex: 0,
-      "aria-label": `${s.name} ${s.shape}, 대기 ${s.waiting.length}명, 정원 ${capacity(s)}명`,
-    });
-    svg(
-      "circle",
-      { cx: s.x, cy: s.y, r: 24, fill: "transparent", "pointer-events": "all" },
-      g,
-    );
-    {
-      const radius = s.interchange ? 24 : 21,
-        circumference = 2 * Math.PI * radius;
+    let entry = stationNodes.get(s.id);
+    if (!entry?.node.isConnected) {
+      entry = {
+        node: svg(
+          "g",
+          {
+            class: "station",
+            "data-station": s.id,
+            role: "button",
+            tabindex: 0,
+          },
+          $("stations"),
+        ),
+      };
+      stationNodes.set(s.id, entry);
+    }
+    const g = entry.node;
+    if (entry.key !== key) {
+      entry.key = key;
+      entry.waitingKey = null;
+      entry.crowded = undefined;
+      entry.scale = undefined;
+      g.replaceChildren();
       svg(
+        "circle",
+        {
+          cx: s.x,
+          cy: s.y,
+          r: 24,
+          fill: "transparent",
+          "pointer-events": "all",
+        },
+        g,
+      );
+      const radius = s.interchange ? 24 : 21;
+      entry.track = svg(
         "circle",
         {
           cx: s.x,
@@ -635,10 +652,11 @@ function renderStations() {
           class: "crowd-track",
           stroke: "var(--crowd-track)",
           "stroke-width": 5,
+          visibility: "hidden",
         },
         g,
       );
-      svg(
+      entry.ring = svg(
         "circle",
         {
           cx: s.x,
@@ -648,65 +666,72 @@ function renderStations() {
           class: "crowd-progress",
           stroke: "#db6354",
           "stroke-width": 5,
-          "stroke-dasharray": `${(circumference * s.crowded) / RULES.crowdSeconds} ${circumference}`,
           transform: `rotate(-90 ${s.x} ${s.y})`,
+          visibility: "hidden",
         },
         g,
       );
-    }
-    if (s.interchange)
-      svg(
-        "circle",
-        {
-          cx: s.x,
-          cy: s.y,
-          r: 18,
-          fill: "var(--station)",
-          stroke: "var(--ink)",
-          "stroke-width": 2,
-        },
-        g,
-      );
-    shape(s.shape, s.x, s.y, s.interchange ? 12 : 10, g, {
-      class: "station-shape",
-      fill: "var(--station)",
-      stroke: "var(--ink)",
-      "stroke-width": 2.5,
-    });
-    const label = svg(
-      "text",
-      { x: s.x, y: s.y + 33, "text-anchor": "middle", class: "station-label" },
-      g,
-    );
-    label.textContent = s.name;
-    s.waiting
-      .slice(0, 24)
-      .forEach((p, i) =>
-        shape(
-          p,
-          s.x + 23 + (i % 6) * 8,
-          s.y - 12 + Math.floor(i / 6) * 9,
-          2.5,
+      if (s.interchange)
+        svg(
+          "circle",
+          {
+            cx: s.x,
+            cy: s.y,
+            r: 18,
+            fill: "var(--station)",
+            stroke: "var(--ink)",
+            "stroke-width": 2,
+          },
           g,
-          { class: "passenger" },
-        ),
-      );
-    if (s.waiting.length > 24) {
-      const count = svg(
+        );
+      shape(s.shape, s.x, s.y, s.interchange ? 12 : 10, g, {
+        class: "station-shape",
+        fill: "var(--station)",
+        stroke: "var(--ink)",
+        "stroke-width": 2.5,
+      });
+      const label = svg(
         "text",
-        { x: s.x + 25, y: s.y + 34, "font-size": 8, fill: "#db6354" },
+        {
+          x: s.x,
+          y: s.y + 33,
+          "text-anchor": "middle",
+          class: "station-label",
+        },
         g,
       );
-      count.textContent = `+${s.waiting.length - 24}`;
+      label.textContent = s.name;
+      entry.passengers = svg("g", { class: "waiting-passengers" }, g);
     }
-    if (existing?.node.isConnected) existing.node.replaceWith(g);
-    else $("stations").append(g);
-    stationNodes.set(s.id, {
-      key,
-      node: g,
-      track: g.querySelector(".crowd-track"),
-      ring: g.querySelector(".crowd-progress"),
-    });
+    const waitingKey = JSON.stringify(s.waiting);
+    if (entry.waitingKey !== waitingKey) {
+      entry.waitingKey = waitingKey;
+      g.setAttribute(
+        "aria-label",
+        `${s.name} ${s.shape}, 대기 ${s.waiting.length}명, 정원 ${capacity(s)}명`,
+      );
+      entry.passengers.replaceChildren();
+      s.waiting
+        .slice(0, 24)
+        .forEach((p, i) =>
+          shape(
+            p,
+            s.x + 23 + (i % 6) * 8,
+            s.y - 12 + Math.floor(i / 6) * 9,
+            2.5,
+            entry.passengers,
+            { class: "passenger" },
+          ),
+        );
+      if (s.waiting.length > 24) {
+        const count = svg(
+          "text",
+          { x: s.x + 25, y: s.y + 34, "font-size": 8, fill: "#db6354" },
+          entry.passengers,
+        );
+        count.textContent = `+${s.waiting.length - 24}`;
+      }
+    }
   }
   for (const [id, entry] of stationNodes)
     if (!alive.has(id)) {
@@ -859,8 +884,8 @@ function updateCrowding() {
     if (entry.crowded === station.crowded) continue;
     entry.crowded = station.crowded;
     const circumference = 2 * Math.PI * (station.interchange ? 24 : 21);
-    entry.track.style.opacity = entry.ring.style.opacity =
-      station.crowded > 0 ? "1" : "0";
+    entry.track.style.visibility = entry.ring.style.visibility =
+      station.crowded > 0 ? "visible" : "hidden";
     entry.ring.setAttribute(
       "stroke-dasharray",
       `${(circumference * station.crowded) / RULES.crowdSeconds} ${circumference}`,
@@ -1266,29 +1291,27 @@ function updateDragPreview(event) {
       ids[index] = target;
       if (other >= 0 && other !== index) ids[other] = gesture.editStation;
     }
-    $("drag-preview").replaceChildren();
     const stops = ids.map((id) => game.stations[id]);
     if (line.loop && stops.length >= 3) stops.push(stops[0]);
     const points = [];
     for (let i = 1; i < stops.length; i++)
       points.push(...edgePoints(stops[i - 1], stops[i]));
-    svg(
-      "polyline",
-      {
-        points: points.map((q) => `${q.x},${q.y}`).join(" "),
-        fill: "none",
-        stroke: colors()[selected],
-        "stroke-width": 7,
-        opacity: 0.7,
-        "stroke-linejoin": "round",
-      },
-      $("drag-preview"),
-    );
-    const text = svg(
-      "text",
-      { x: p.x + 18, y: p.y - 18, "font-size": 11, fill: "var(--ink)" },
-      $("drag-preview"),
-    );
+    setDragPath(points, {
+      fill: "none",
+      stroke: colors()[selected],
+      "stroke-width": 7,
+      opacity: 0.7,
+      "stroke-linejoin": "round",
+    });
+    let text = $("drag-preview").querySelector("text");
+    if (!text)
+      text = svg(
+        "text",
+        { x: p.x + 18, y: p.y - 18, "font-size": 11, fill: "var(--ink)" },
+        $("drag-preview"),
+      );
+    text.setAttribute("x", p.x + 18);
+    text.setAttribute("y", p.y - 18);
     text.textContent =
       target === null
         ? "노선에서 제외"
@@ -1298,7 +1321,6 @@ function updateDragPreview(event) {
     return;
   }
   if (gesture.edge !== undefined) {
-    $("drag-preview").replaceChildren();
     const edge = lineEdges(game.lines[gesture.line])[gesture.edge];
     if (!edge) return;
     const id = nearestStation(p),
@@ -1307,18 +1329,13 @@ function updateDragPreview(event) {
       ...edgePoints(game.stations[edge[0]], middle),
       ...edgePoints(middle, game.stations[edge[1]]),
     ];
-    svg(
-      "polyline",
-      {
-        points: points.map((q) => `${q.x},${q.y}`).join(" "),
-        fill: "none",
-        stroke: colors()[gesture.line],
-        "stroke-width": 6,
-        "stroke-linejoin": "round",
-        opacity: 0.7,
-      },
-      $("drag-preview"),
-    );
+    setDragPath(points, {
+      fill: "none",
+      stroke: colors()[gesture.line],
+      "stroke-width": 6,
+      "stroke-linejoin": "round",
+      opacity: 0.7,
+    });
     return;
   }
   if (gesture.train !== undefined || gesture.resource) {
@@ -1353,7 +1370,6 @@ function updateDragPreview(event) {
     return;
   }
   if (tool === "connect" && gesture.station !== undefined) {
-    $("drag-preview").replaceChildren();
     const stops = gesture.path.map((id) => game.stations[id]);
     const target = nearestStation(p);
     const finish = target !== null ? game.stations[target] : { ...p, id: 9999 };
@@ -1361,33 +1377,14 @@ function updateDragPreview(event) {
     for (let i = 1; i < stops.length; i++)
       points.push(...edgePoints(stops[i - 1], stops[i]));
     points.push(...edgePoints(stops.at(-1), finish));
-    svg(
-      "polyline",
-      {
-        points: points.map((q) => `${q.x},${q.y}`).join(" "),
-        fill: "none",
-        stroke: colors()[selected],
-        "stroke-width": 6,
-        "stroke-linecap": "round",
-        "stroke-linejoin": "round",
-        opacity: 0.65,
-      },
-      $("drag-preview"),
-    );
-    for (const stop of stops)
-      svg(
-        "circle",
-        {
-          cx: stop.x,
-          cy: stop.y,
-          r: 18,
-          fill: "none",
-          stroke: colors()[selected],
-          "stroke-width": 2,
-          opacity: 0.5,
-        },
-        $("drag-preview"),
-      );
+    setDragPath(points, {
+      fill: "none",
+      stroke: colors()[selected],
+      "stroke-width": 6,
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      opacity: 0.65,
+    });
   } else if (tool === "move-station") {
     $("drag-preview").replaceChildren();
     shape(
@@ -1858,6 +1855,7 @@ function frame(now) {
   viewGestureDirty = false;
   let sceneUpdated = false;
   flushDragPreview();
+  animateDragPreview(now);
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   if (
@@ -1897,11 +1895,7 @@ function frame(now) {
     game.events = [];
     syncStateDialogs();
     visual += dt;
-    if (
-      visual > 0.25 &&
-      !gesture &&
-      !$("map").contains(document.activeElement)
-    ) {
+    if (visual > 0.25 && !gesture) {
       render();
       visual = 0;
     } else drawTrains();
@@ -2419,4 +2413,36 @@ function advanceCamera(now) {
     render();
   }
   return true;
+}
+
+function setDragPath(points, attributes) {
+  if (!previewMotion?.node.isConnected) {
+    $("drag-preview").replaceChildren();
+    previewMotion = {
+      node: svg("polyline", attributes, $("drag-preview")),
+      points: samplePath([points[0], points[0]]),
+      last: performance.now(),
+    };
+  }
+  for (const [name, value] of Object.entries(attributes))
+    previewMotion.node.setAttribute(name, value);
+  previewMotion.target = samplePath(points);
+}
+function animateDragPreview(now) {
+  if (!previewMotion?.node.isConnected) {
+    previewMotion = null;
+    return;
+  }
+  const motion = previewMotion;
+  motion.points = easePath(
+    motion.points,
+    motion.target,
+    Math.min(0.1, Math.max(0, (now - motion.last) / 1000)),
+    reducedMotion(),
+  );
+  motion.last = now;
+  motion.node.setAttribute(
+    "points",
+    motion.points.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" "),
+  );
 }

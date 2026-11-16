@@ -1,4 +1,4 @@
-import { getMap, INITIAL_UNLOCKS } from "./maps.js?v=9";
+import { getMap, INITIAL_UNLOCKS } from "./maps.js?v=10";
 // Seoul rules. Timing and demand rates not specified by the reference are tuned here.
 export const COLORS = [
   "#de6657",

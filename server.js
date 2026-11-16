@@ -7,6 +7,8 @@ const types = {
   js: "text/javascript",
   css: "text/css",
   svg: "image/svg+xml",
+  png: "image/png",
+  webmanifest: "application/manifest+json",
 };
 http
   .createServer(async (req, res) => {
@@ -24,6 +26,13 @@ http
           "maps.js",
           "motion.js",
           "theme.js",
+          "install.js",
+          "sw.js",
+          "manifest.webmanifest",
+          "icons/metro.svg",
+          "icons/icon-192.png",
+          "icons/icon-512.png",
+          "icons/apple-touch-icon.png",
         ].includes(file)
       ) {
         res.writeHead(404);

@@ -7,12 +7,21 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
     <meta name="theme-color" content="#151515" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="Mini Metro" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/metro.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
     <meta
       name="description"
       content="도시를 잇는 작은 지하철. 노선을 그리고 열차를 배치해 승객을 수송하세요."
     />
     <title>Very Mini Metro</title>
-    <link rel="stylesheet" href="style.css?v=9" />
+    <link rel="stylesheet" href="style.css?v=10" />
   </head>
   <body class="at-home">
     <section id="home-screen" class="home-screen" aria-label="시작 화면">
@@ -20,6 +29,7 @@
         <span class="home-wordmark"
           ><span class="brand-icon">m</span> very mini metro</span
         >
+        <button id="install-app" class="small-button">앱 추가</button>
       </nav>
       <div class="home-content">
         <div class="home-copy">
@@ -426,6 +436,11 @@
         열차·객차를 옮기면 다음 도착역에서 승객을 하차시킨 후 이동합니다.
       </p>
     </dialog>
+    <dialog id="install-dialog" aria-labelledby="install-title">
+      <button id="install-close" class="close" aria-label="닫기">×</button>
+      <h2 id="install-title">앱 추가</h2>
+      <p id="install-instructions"></p>
+    </dialog>
     <dialog id="settings-dialog">
       <button class="close" id="close-settings" aria-label="닫기">×</button>
 
@@ -448,8 +463,9 @@
     </dialog>
     <script
       type="module"
-      src="game.js?v=9"
+      src="game.js?v=10"
       onerror="document.getElementById('load-error').hidden = false"
     ></script>
+    <script type="module" src="install.js?v=10"></script>
   </body>
 </html>

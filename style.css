@@ -2278,18 +2278,6 @@ footer {
 .crowd-track,
 .crowd-progress {
   pointer-events: none;
-  transition: opacity 0.15s linear;
-}
-.station-arrival .station-shape {
-  animation: station-arrive 0.22s ease-out;
-}
-@keyframes station-arrive {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
 }
 
 /* Graphite surfaces keep the interface quiet around the coloured network. */
@@ -2648,5 +2636,113 @@ body:not(.at-home) > main {
   }
   .home-art {
     max-width: 230px;
+  }
+}
+
+.station:hover .station-shape {
+  stroke-width: 2.5;
+}
+#install-app {
+  min-height: 40px;
+  white-space: nowrap;
+}
+#install-instructions {
+  font-size: 14px;
+  line-height: 1.9;
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+/* Keep line colours in their own bottom row, clear of messages and assets. */
+@media (max-width: 700px), (max-height: 550px) and (orientation: landscape) {
+  .controlbar,
+  .planning .controlbar {
+    top: auto;
+    bottom: calc(86px + env(safe-area-inset-bottom));
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(
+      420px,
+      calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right))
+    );
+    padding: 6px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    align-items: stretch;
+  }
+  .line-panel {
+    width: 100%;
+    min-width: 0;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 10px;
+  }
+  .lines {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 5px;
+    margin: -5px;
+  }
+  .line-button {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+  }
+  .clear-button {
+    min-width: 32px;
+    min-height: 36px;
+  }
+  .resourcebar {
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+  .zoom {
+    bottom: calc(150px + env(safe-area-inset-bottom));
+  }
+  .coach {
+    bottom: calc(150px + env(safe-area-inset-bottom));
+    left: max(15px, env(safe-area-inset-left));
+    right: 65px;
+    max-width: 340px;
+  }
+  .creative-tools,
+  .planning .creative-tools {
+    bottom: calc(150px + env(safe-area-inset-bottom));
+  }
+  #station-editor-toggle {
+    bottom: calc(150px + env(safe-area-inset-bottom));
+  }
+}
+@media (max-width: 350px) {
+  .line-button {
+    width: 28px;
+    height: 28px;
+  }
+  .lines,
+  .line-panel {
+    gap: 8px;
+  }
+}
+@media (max-height: 550px) and (orientation: landscape) {
+  .zoom {
+    left: max(16px, env(safe-area-inset-left));
+    right: auto;
+    display: flex;
+  }
+  .zoom button + button {
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+  .coach {
+    left: max(136px, calc(120px + env(safe-area-inset-left)));
+    max-width: 300px;
   }
 }
