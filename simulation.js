@@ -1,4 +1,4 @@
-import { getMap, INITIAL_UNLOCKS } from "./maps.js?v=10";
+import { getMap, INITIAL_UNLOCKS } from "./maps.js?v=11";
 // Seoul rules. Timing and demand rates not specified by the reference are tuned here.
 export const COLORS = [
   "#de6657",
@@ -20,8 +20,8 @@ export const SPECIAL = [
   "oval",
 ];
 export const RULES = {
-  day: 30,
-  week: 210,
+  day: 25,
+  week: 175,
   stationCapacity: 5,
   crowdSeconds: 45,
   seats: 6,
@@ -115,9 +115,9 @@ export function createGame(
     score: 0,
     elapsed: 0,
     nextStation: 24,
-    nextUpgrade: 180,
+    nextUpgrade: RULES.day * 6,
     upgradeCount: 0,
-    nextEfficiency: 30,
+    nextEfficiency: RULES.day,
     deliveredToday: 0,
     efficiency: 0,
     pendingUpgrade: null,
@@ -129,52 +129,27 @@ export function createGame(
     discarded: 0,
     preview: null,
   };
-  const positions =
-    map.id === "seoul"
-      ? [
-          [450, 190],
-          [680, 190],
-          [440, 325],
-        ]
-      : [
-          [425, 175],
-          [565, 125],
-          [700, 190],
-        ];
-  BASIC.forEach((shape, id) => {
-    let x = positions[id][0] + (clampRandom(random) - 0.5) * 45;
-    let y = positions[id][1] + (clampRandom(random) - 0.5) * 25;
-    if (map.id === "stockholm" && id === 2) {
-      x = 410;
-      y = 375;
-    }
-    if (map.id === "lagos" && id === 2) {
-      x = 935;
-      y = 420;
-    }
-    if (map.id === "seoul" && id === 2) {
-      x = 440;
-      y = 325;
-    }
-    if (waterAt(x, y, 4, game)) {
-      outer: for (let gy = 100; gy < 460; gy += 55)
-        for (let gx = 250; gx < 850; gx += 65) {
-          if (
-            !waterAt(gx, gy, 8, game) &&
-            game.stations.every((s) => Math.hypot(s.x - gx, s.y - gy) > 80)
-          ) {
-            x = gx;
-            y = gy;
+  const addInitialStation = (shape) => {
+    const location = generateLocation(game, random);
+    // Deterministic fallback also supports callers supplying a constant RNG.
+    let fallback = null;
+    if (!location) {
+      outer: for (let y = 110; y < 460; y += 55)
+        for (let x = 250; x < 950; x += 65)
+          if (!waterAt(x, y, 20, game) &&
+              game.stations.every((station) => Math.hypot(station.x - x, station.y - y) > 65)) {
+            fallback = { x, y };
             break outer;
           }
-        }
     }
+    const { x, y } = location ?? fallback;
     addStation(game, shape, x, y);
-  });
+  };
+  BASIC.forEach(addInitialStation);
   if (map.id === "seoul") game.stations[2].name = "여의도";
   if (map.id === "shanghai") {
-    addStation(game, "circle", 300, 220);
-    addStation(game, "triangle", 320, 115);
+    addInitialStation("circle");
+    addInitialStation("triangle");
   }
   return game;
 }
@@ -241,6 +216,9 @@ export function waterAt(x, y, margin = 0, game = { mapId: "seoul" }) {
 }
 export function edgePoints(a, b) {
   if (a.id > b.id) return edgePoints(b, a).reverse();
+  const custom = a.trackBends?.[b.id];
+  if (custom && Number.isFinite(custom.x) && Number.isFinite(custom.y))
+    return [a, custom, b];
   const dx = b.x - a.x,
     dy = b.y - a.y,
     diagonal = Math.min(Math.abs(dx), Math.abs(dy));
@@ -252,6 +230,44 @@ export function edgePoints(a, b) {
     (p, i, arr) =>
       !i || Math.hypot(p.x - arr[i - 1].x, p.y - arr[i - 1].y) > 0.01,
   );
+}
+// Shared corridors use the same geometry for drawing, routing, tunnels and trains.
+export function reshapeTrack(game, lineId, edgeIndex, point) {
+  if (game.gameOver) return result(false, "게임이 종료되었습니다.");
+  if (game.mode === "extreme" && !game.planning)
+    return result(false, "익스트림에서는 선형을 바꿀 수 없습니다.");
+  const line = game.lines[lineId];
+  const edge = line && lineEdges(line)[edgeIndex];
+  if (!edge || !Number.isFinite(point.x) || !Number.isFinite(point.y))
+    return result(false, "올바른 선로를 선택하세요.");
+  const [a, b] = edge.map((id) => game.stations[id]).sort((a, b) => a.id - b.id);
+  const midpoint = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const limit = Math.min(100, Math.hypot(b.x - a.x, b.y - a.y) * 0.4);
+  const distance = Math.hypot(point.x - midpoint.x, point.y - midpoint.y);
+  const ratio = Math.min(1, limit / (distance || 1));
+  const old = a.trackBends?.[b.id];
+  a.trackBends ??= {};
+  a.trackBends[b.id] = { x: midpoint.x + (point.x - midpoint.x) * ratio,
+    y: midpoint.y + (point.y - midpoint.y) * ratio };
+  const validation = validateLine(game, lineId, line);
+  if (!validation.ok) {
+    if (old) a.trackBends[b.id] = old;
+    else delete a.trackBends[b.id];
+    return validation;
+  }
+  game.routeVersion = (game.routeVersion ?? 0) + 1;
+  return result(true, "선형 변경 · 곧은 선로일수록 빠르게 운행합니다.");
+}
+export function trackSpeedFactor(a, b) {
+  const points = edgePoints(a, b);
+  let turning = 0;
+  for (let i = 1; i < points.length - 1; i++) {
+    const u = { x: points[i].x - points[i - 1].x, y: points[i].y - points[i - 1].y };
+    const v = { x: points[i + 1].x - points[i].x, y: points[i + 1].y - points[i].y };
+    const lengths = Math.hypot(u.x, u.y) * Math.hypot(v.x, v.y);
+    if (lengths > 0) turning += Math.acos(Math.max(-1, Math.min(1, (u.x * v.x + u.y * v.y) / lengths)));
+  }
+  return 1 / (1 + turning * 0.22);
 }
 export function edgeLength(a, b) {
   const points = edgePoints(a, b);
@@ -473,7 +489,8 @@ export function journey(
           : 0;
       const cost =
         item.cost +
-        edgeLength(game.stations[item.id], game.stations[edge.to]) / 85 +
+        edgeLength(game.stations[item.id], game.stations[edge.to]) /
+          (85 * trackSpeedFactor(game.stations[item.id], game.stations[edge.to])) +
         0.6 +
         transfer;
       queue.push({
@@ -899,7 +916,7 @@ function step(game, dt, random) {
         train.crossVersion = game.routeVersion;
       }
       const velocity =
-        (85 * map.speed * (train.type === "shinkansen" ? 2.5 : 1)) /
+        (85 * map.speed * trackSpeedFactor(a, b) * (train.type === "shinkansen" ? 2.5 : 1)) /
         (1 + (train.crossings ?? 0) * 0.7);
       train.progress += (dt * velocity) / (edgeLength(a, b) || 1);
       if (train.progress < 1) continue;
@@ -1092,7 +1109,12 @@ export function deleteStation(game, id) {
   game.stations.splice(id, 1);
   game.stations.forEach((s, i) => {
     s.id = i;
+    if (s.trackBends) s.trackBends = Object.fromEntries(
+      Object.entries(s.trackBends).filter(([key]) => Number(key) !== id)
+        .map(([key, bend]) => [Number(key) > id ? Number(key) - 1 : key, bend]),
+    );
   });
+  game.routeVersion = (game.routeVersion ?? 0) + 1;
   game.lines.forEach((l) => {
     l.stations = l.stations.map((s) => (s > id ? s - 1 : s));
   });
@@ -1222,6 +1244,11 @@ export function validSavedGame(game) {
         s.id === i &&
         passenger(s.shape) &&
         [s.x, s.y, s.crowded, s.nextSpawn, s.limit].every(Number.isFinite) &&
+        (s.trackBends === undefined || (s.trackBends && typeof s.trackBends === "object" &&
+          Object.entries(s.trackBends).every(([key, point]) => id(Number(key)) && Number(key) > i &&
+            point && Number.isFinite(point.x) && Number.isFinite(point.y) &&
+            Math.hypot(point.x - (s.x + game.stations[key].x) / 2,
+              point.y - (s.y + game.stations[key].y) / 2) <= 100.001))) &&
         Array.isArray(s.waiting) &&
         s.waiting.every(passenger),
     )
@@ -1328,10 +1355,19 @@ export function moveStation(game, id, x, y) {
   )
     return result(false, "다른 역과 간격을 충분히 띄워주세요.");
   const old = { x: station.x, y: station.y };
+  const bends = [];
+  for (const owner of game.stations)
+    for (const [key, bend] of Object.entries(owner.trackBends ?? {}))
+      if (owner.id === id || Number(key) === id) {
+        bends.push([bend, { ...bend }]);
+        bend.x += (x - old.x) / 2;
+        bend.y += (y - old.y) / 2;
+      }
   station.x = x;
   station.y = y;
   if (!creative(game) && tunnelsUsed(game) > game.stock.tunnels) {
     Object.assign(station, old);
+    for (const [bend, previous] of bends) Object.assign(bend, previous);
     return result(false, "이 위치로 이동하면 터널이 부족합니다.");
   }
   game.routeVersion = (game.routeVersion ?? 0) + 1;

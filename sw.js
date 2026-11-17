@@ -1,15 +1,15 @@
 const CACHE_PREFIX = "very-mini-metro-shell-";
-const CACHE = `${CACHE_PREFIX}10`;
+const CACHE = `${CACHE_PREFIX}11`;
 const APP_FILES = [
   "./",
   "index.html",
-  "style.css?v=10",
-  "game.js?v=10",
-  "simulation.js?v=10",
-  "maps.js?v=10",
-  "motion.js?v=10",
-  "theme.js?v=10",
-  "install.js?v=10",
+  "style.css?v=11",
+  "game.js?v=11",
+  "simulation.js?v=11",
+  "maps.js?v=11",
+  "motion.js?v=11",
+  "theme.js?v=11",
+  "install.js?v=11",
   "manifest.webmanifest",
   "icons/metro.svg",
   "icons/icon-192.png",

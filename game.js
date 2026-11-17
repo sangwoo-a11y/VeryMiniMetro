@@ -1,5 +1,5 @@
-import { readableLineColor } from "./theme.js?v=10";
-import { smoothAngle, cameraAt, samplePath, easePath } from "./motion.js?v=10";
+import { readableLineColor } from "./theme.js?v=11";
+import { smoothAngle, cameraAt, samplePath, easePath } from "./motion.js?v=11";
 import {
   MAPS,
   getMap,
@@ -9,7 +9,7 @@ import {
   cityUnlocked,
   canStartCity,
   cityRequirement,
-} from "./maps.js?v=10";
+} from "./maps.js?v=11";
 import {
   BASIC,
   SPECIAL,
@@ -19,6 +19,7 @@ import {
   recordProgress,
   tick,
   drawRoute,
+  reshapeTrack,
   insertStation,
   removeStation,
   replaceStation,
@@ -47,7 +48,7 @@ import {
   launchDesign,
   moveStation,
   canDesign,
-} from "./simulation.js?v=10";
+} from "./simulation.js?v=11";
 
 const $ = (id) => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
@@ -345,7 +346,7 @@ function setTool(next) {
 const TOOL_HINTS = {
   "move-station":
     "역을 드래그해 위치를 조정하세요. 운행 전까지만 이동할 수 있습니다.",
-  connect: "역 사이를 드래그 · 선로를 새 역으로 드래그하면 중간에 삽입",
+  connect: "역 사이를 드래그 · 선로를 빈 곳에 끌어 굽힘 조절 · 역 위에 놓아 삽입",
   train: "열차를 선로 위로 드래그하거나, 선택 노선의 역을 누르세요.",
   fast: "신칸센을 배치할 선택 노선의 역을 누르세요.",
   carriage: "객차를 열차 위로 드래그하거나 열차를 누르세요.",
@@ -425,7 +426,7 @@ function renderRoutes() {
   const key = JSON.stringify([
     game.mapId,
     game.lines,
-    game.stations.map((s) => [s.x, s.y]),
+    game.stations.map((s) => [s.x, s.y, s.trackBends]),
     game.trains.map((t) => [t.id, t.from, t.to]),
     selected,
     tool,
@@ -1325,9 +1326,13 @@ function updateDragPreview(event) {
     if (!edge) return;
     const id = nearestStation(p),
       middle = id === null ? { ...p, id: 9999 } : game.stations[id];
-    const points = [
-      ...edgePoints(game.stations[edge[0]], middle),
-      ...edgePoints(middle, game.stations[edge[1]]),
+    const a = game.stations[edge[0]], b = game.stations[edge[1]];
+    const midpoint = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const limit = Math.min(100, Math.hypot(b.x - a.x, b.y - a.y) * .4);
+    const ratio = Math.min(1, limit / (Math.hypot(p.x - midpoint.x, p.y - midpoint.y) || 1));
+    const points = id === null ? [a, { x: midpoint.x + (p.x - midpoint.x) * ratio,
+      y: midpoint.y + (p.y - midpoint.y) * ratio }, b] : [
+      ...edgePoints(a, middle), ...edgePoints(middle, b),
     ];
     setDragPath(points, {
       fill: "none",
@@ -1486,6 +1491,7 @@ window.addEventListener("pointerup", (event) => {
       const target = nearestStation(released);
       if (target !== null)
         notify(insertStation(game, old.line, old.edge, target));
+      else notify(reshapeTrack(game, old.line, old.edge, released));
       pendingInsert = null;
       updateTools();
     }
@@ -1513,7 +1519,24 @@ window.addEventListener("pointerup", (event) => {
     }
     collectDragStations(old, released);
     if (old.path.at(-1) !== target) old.path.push(target);
-    notify(drawRoute(game, selected, old.path));
+    if (notify(drawRoute(game, selected, old.path))) {
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
+        $("routes").querySelectorAll(`[data-line="${selected}"] > polyline:nth-child(2)`).forEach((node) =>
+          node.animate([{ strokeWidth: "6px" }, { strokeWidth: "9px", offset: .35 },
+            { strokeWidth: "5px", offset: .7 }, { strokeWidth: "6px" }], { duration: 420 }));
+      for (const id of old.path) {
+        const node = $("stations").querySelector(`[data-station="${id}"]`);
+        if (node && !matchMedia("(prefers-reduced-motion: reduce)").matches)
+          for (const child of node.children) {
+            const origin = `${game.stations[id].x}px ${game.stations[id].y}px`;
+            child.animate([{ scale: "1", transformOrigin: origin },
+              { scale: "1.28", transformOrigin: origin, offset: .35 },
+              { scale: ".94", transformOrigin: origin, offset: .7 },
+              { scale: "1", transformOrigin: origin }],
+              { duration: 420, easing: "ease-out" });
+          }
+      }
+    }
   } else if (!moved) {
     if (old.end) endpoint = old.end;
     selectStation(old.station);
@@ -1610,6 +1633,15 @@ function updateRecords() {
     if (event.type === "medal") toast("1000명 수송 메달 달성");
   }
 }
+async function selectionMotion(node) {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  await node.animate([
+    { transform: "scale(1)", opacity: 1 },
+    { transform: "scale(.94)", opacity: .8, offset: .25 },
+    { transform: "scale(1.035)", opacity: 1, offset: .7 },
+    { transform: "scale(1)", opacity: 1 },
+  ], { duration: 280, easing: "ease-out" }).finished.catch(() => {});
+}
 function showUpgrade() {
   const map = getMap(game.mapId);
   $("upgrade-trains").textContent =
@@ -1639,7 +1671,10 @@ function showUpgrade() {
     b.className = "upgrade-card";
     const [icon, title, description] = labels[choice];
     b.innerHTML = `<span>${icon}</span><strong>${title}</strong><small>${description}</small>`;
-    b.onclick = () => {
+    b.onclick = async () => {
+      if (b.disabled) return;
+      $("upgrade-options").querySelectorAll("button").forEach((button) => { button.disabled = true; });
+      await selectionMotion(b);
       const engine = document.querySelector(
         'input[name="engine"]:checked',
       ).value;
@@ -2154,7 +2189,11 @@ function renderCities() {
       ? `${map.maxLines}개 노선 · 최고 ${profile.best[`${map.id}:normal`] ?? 0}명`
       : "잠김";
     button.append(detail);
-    button.onclick = () => {
+    button.onclick = async () => {
+      if (cards.dataset.selecting === "true") return;
+      cards.dataset.selecting = "true";
+      await selectionMotion(button);
+      cards.dataset.selecting = "false";
       menuMap = map.id;
       if (!canStartCity(profile, menuMap, cityMode)) cityMode = "normal";
       renderCities();
@@ -2253,7 +2292,7 @@ const GUIDE = [
   ],
   [
     "역에서 역으로 끌어 연결하세요.",
-    "마우스나 손가락을 누른 채 역 사이를 드래그합니다. 끝의 T 손잡이로 노선을 연장·단축하고, 선로를 새 역으로 끌면 중간에 삽입합니다. 양 끝을 연결하면 순환선이 됩니다. 중간역 바로 옆의 선로를 잡아 다른 역으로 옮기면 연결을 변경하고, 빈 곳으로 빼면 그 역을 건너뜁니다. 별도 편집 손잡이는 없습니다.",
+    "마우스나 손가락을 누른 채 역 사이를 드래그합니다. 끝의 T 손잡이로 노선을 연장·단축하고, 선로를 새 역으로 끌면 중간에 삽입합니다. 양 끝을 연결하면 순환선이 됩니다. 중간역 바로 옆의 선로를 잡아 다른 역으로 옮기면 연결을 변경하고, 빈 곳으로 빼면 그 역을 건너뜁니다. 선로 가운데를 잡아 빈 공간에 놓으면 굽힘을 조절합니다. 짧고 곧은 선로일수록 빠릅니다.",
   ],
   [
     "열차와 자산을 배치하세요.",

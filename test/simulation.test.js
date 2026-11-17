@@ -209,6 +209,7 @@ test("removing or inserting a station never teleports an in-transit train", () =
 });
 test("tunnels cost one per water-crossing interstation section, and edits return them", () => {
   const g = createGame("normal", rng(), "seoul");
+  [[450, 190], [680, 190], [440, 325]].forEach(([x, y], i) => Object.assign(g.stations[i], { x, y }));
   line(g, 0, [0, 1]);
   const before = tunnelsUsed(g);
   assert.equal(connect(g, 0, 2).ok, true);
@@ -606,6 +607,7 @@ test("one continuous drag can connect several stations with one locomotive", asy
 test("an invalid drag leaves no partial route and consumes no inventory", async () => {
   const { drawRoute } = await import("../simulation.js");
   const g = createGame("normal", rng(), "seoul");
+  [[450, 190], [680, 190], [440, 325]].forEach(([x, y], i) => Object.assign(g.stations[i], { x, y }));
   g.stock.tunnels = 0;
   const before = JSON.stringify(g.lines),
     stock = g.stock.locomotives;
@@ -765,4 +767,62 @@ test("middle edit rejects insufficient tunnels and remains forbidden in extreme 
   const h = quiet("extreme");
   line(h, 0, [0, 1, 2]);
   assert.equal(replaceStation(h, 0, 1, 0).ok, false);
+});
+
+test("random initial layouts stay on land, separated and reproducible", () => {
+  for (const map of MAPS) {
+    const a = createGame("normal", rng(41), map.id);
+    const b = createGame("normal", rng(92), map.id);
+    assert.notDeepEqual(a.stations.slice(0, 3).map(s => [s.x, s.y]), b.stations.slice(0, 3).map(s => [s.x, s.y]));
+    assert.deepEqual(a.stations, createGame("normal", rng(41), map.id).stations);
+    a.stations.slice(0, 3).forEach((s, i, stations) => {
+      assert.equal(waterAt(s.x, s.y, 20, a), false);
+      stations.slice(i + 1).forEach(t => assert.ok(Math.hypot(s.x-t.x, s.y-t.y) > 65));
+    });
+  }
+});
+test("reshaped tracks persist, reverse correctly and change train travel time", async () => {
+  const { reshapeTrack, trackSpeedFactor } = await import("../simulation.js");
+  const g = quiet();
+  g.stations[0].x = 300; g.stations[0].y = 100;
+  g.stations[1].x = 500; g.stations[1].y = 100;
+  line(g, 0, [0, 1]);
+  const straight = structuredClone(g);
+  assert.equal(trackSpeedFactor(g.stations[0], g.stations[1]), 1);
+  assert.equal(reshapeTrack(g, 0, 0, { x: 400, y: 175 }).ok, true);
+  assert.ok(trackSpeedFactor(g.stations[0], g.stations[1]) < 1);
+  assert.ok(edgeLength(g.stations[0], g.stations[1]) > 200);
+  assert.deepEqual(edgePoints(g.stations[0], g.stations[1]), edgePoints(g.stations[1], g.stations[0]).reverse());
+  assert.ok(validSavedGame(JSON.parse(JSON.stringify(g))));
+  run(g, 1.5); run(straight, 1.5);
+  assert.ok(g.trains[0].progress < straight.trains[0].progress);
+  const before = JSON.stringify(g.stations);
+  assert.equal(reshapeTrack(g, 0, 0, { x: NaN, y: 10 }).ok, false);
+  g.mode = "extreme";
+  assert.equal(reshapeTrack(g, 0, 0, { x: 400, y: 110 }).ok, false);
+  assert.equal(JSON.stringify(g.stations), before);
+});
+test("reshaping cannot bypass tunnel inventory and invalid saved bends are rejected", async () => {
+  const { reshapeTrack } = await import("../simulation.js");
+  const g = createGame("normal", rng(), "seoul");
+  Object.assign(g.stations[0], { x: 725, y: 230 });
+  Object.assign(g.stations[1], { x: 925, y: 230 });
+  line(g, 0, [0, 1]); g.stock.tunnels = 0;
+  assert.equal(reshapeTrack(g, 0, 0, { x: 825, y: 310 }).ok, false);
+  assert.equal(g.stations[0].trackBends?.[1], undefined);
+  g.stations[0].trackBends = { 1: { x: "bad", y: 1 } };
+  assert.equal(validSavedGame(g), false);
+});
+
+test("25-second days keep the first Sunday and weekly reward aligned", () => {
+  const g = quiet();
+  assert.equal(RULES.day, 25);
+  assert.equal(RULES.week, RULES.day * 7);
+  g.nextUpgrade = createGame().nextUpgrade;
+  run(g, RULES.day * 6 - .2);
+  assert.equal(g.pendingUpgrade, null);
+  run(g, .3);
+  assert.equal(Math.floor(g.elapsed / RULES.day), 6);
+  assert.equal(g.pendingUpgrade.length, 2);
+  assert.equal(g.nextUpgrade, RULES.day * 13);
 });
